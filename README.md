@@ -1,36 +1,67 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# DFF Client (Next.js)
 
-## Getting Started
+Metadata-driven scientific workflow UI for the DFF platform.
 
-First, run the development server:
+## Stack
+
+- Next.js (App Router) + TypeScript
+- Tailwind CSS v4
+- React Query, Zustand, Axios
+- React Hook Form + Zod
+- shadcn/ui (`src/components/ui`)
+
+## Scripts
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run dev      # http://localhost:3000
+npm run build
+npm run start
+npm run lint
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Source layout
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+src/
+├── app/              # Next.js routes & root layout
+├── modules/          # Domain features (categories, drugs, models, …)
+├── renderer/         # Metadata-driven form/workflow engine
+├── shared/           # App-specific shared UI & utilities
+├── providers/        # React Query + Theme providers
+├── services/         # API services (health, system, …)
+├── store/            # Zustand stores
+├── lib/              # axios client + shadcn utils
+├── config/           # Zod env validation
+├── styles/           # Additional global/module styles
+└── types/            # Shared TypeScript types (API contracts)
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Modules
 
-## Learn More
+`categories`, `drugs`, `models`, `templates`, `factors`, `factor-sets`, `formulas`, `outputs`, `workflows`, `governance`
 
-To learn more about Next.js, take a look at the following resources:
+### Renderer
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+`fields`, `sections`, `layouts`, `formulas`, `outputs`, `workflow`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Environment
 
-## Deploy on Vercel
+Copy `.env.example` to `.env.local` (or use `.env`):
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```env
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Validated in `src/config/env.ts` with Zod.
+
+## API layer
+
+Import from `src/services/*.service.ts` (see `dff-service/docs/API.md` for the full active list).
+
+| Module | Used by |
+|--------|---------|
+| `factor.service` | Registry list, create, edit, view, danger zone |
+| `workspace.service` | Factor form workspace + metadata builder |
+| `lookup-collection.service` | Lookup fields, `/lookups` admin page |
+| `lookup.service` | Legacy type-code lookups only |
+| `health.service` | Optional diagnostics |

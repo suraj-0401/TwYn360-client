@@ -1,0 +1,98 @@
+import { apiClient } from "@/lib/axios";
+import type { ApiSuccessResponse } from "@/types/api";
+
+export type LookupCollection = {
+  id: string;
+  code: string;
+  label: string;
+  description: string | null;
+  isSystem: boolean;
+  createdAt: string;
+};
+
+export type LookupCollectionValue = {
+  id: string;
+  code: string;
+  label: string;
+  description: string | null;
+  displayOrder: number;
+  metadata: unknown;
+};
+
+export type CreateLookupCollectionPayload = {
+  label: string;
+  code?: string;
+  description?: string;
+};
+
+export type CreateLookupCollectionValuePayload = {
+  code: string;
+  label: string;
+  description?: string;
+};
+
+export async function listLookupCollections(): Promise<
+  ApiSuccessResponse<LookupCollection[]>
+> {
+  const { data } = await apiClient.get<ApiSuccessResponse<LookupCollection[]>>(
+    "/api/v1/lookup-collections",
+    { skipGlobalErrorToast: true },
+  );
+  return data;
+}
+
+export async function createLookupCollection(
+  payload: CreateLookupCollectionPayload,
+  adminKey?: string,
+): Promise<ApiSuccessResponse<LookupCollection>> {
+  const { data } = await apiClient.post<ApiSuccessResponse<LookupCollection>>(
+    "/api/v1/lookup-collections",
+    payload,
+    {
+      headers: adminKey ? { "x-admin-key": adminKey } : undefined,
+      skipGlobalErrorToast: true,
+    },
+  );
+  return data;
+}
+
+export async function listCollectionValues(
+  collectionId: string,
+): Promise<ApiSuccessResponse<LookupCollectionValue[]>> {
+  const { data } = await apiClient.get<
+    ApiSuccessResponse<LookupCollectionValue[]>
+  >(`/api/v1/lookup-collections/${collectionId}/values`, {
+    skipGlobalErrorToast: true,
+  });
+  return data;
+}
+
+export async function deleteCollectionValue(
+  valueId: string,
+  adminKey?: string,
+): Promise<ApiSuccessResponse<{ id: string }>> {
+  const { data } = await apiClient.delete<ApiSuccessResponse<{ id: string }>>(
+    `/api/v1/lookup-values/${valueId}`,
+    {
+      headers: adminKey ? { "x-admin-key": adminKey } : undefined,
+      skipGlobalErrorToast: true,
+    },
+  );
+  return data;
+}
+
+export async function createCollectionValue(
+  collectionId: string,
+  payload: CreateLookupCollectionValuePayload,
+  adminKey?: string,
+): Promise<ApiSuccessResponse<unknown>> {
+  const { data } = await apiClient.post<ApiSuccessResponse<unknown>>(
+    `/api/v1/lookup-collections/${collectionId}/values`,
+    payload,
+    {
+      headers: adminKey ? { "x-admin-key": adminKey } : undefined,
+      skipGlobalErrorToast: true,
+    },
+  );
+  return data;
+}
