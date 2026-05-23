@@ -9,15 +9,33 @@ export default function Home() {
       <div className="rounded-lg border bg-white p-8 dark:bg-zinc-900">
         <h1 className="text-3xl font-semibold">DFF Scientific Platform</h1>
         <p className="mt-2 max-w-2xl text-muted-foreground">
-          Metadata-driven scientific workflow platform — Factor Registry and
-          configurable metadata workspaces.
+          Metadata-driven scientific workflow platform — categories, drugs,
+          factor registry, factor sets, and configurable workspaces.
         </p>
         <div className="mt-6 flex flex-wrap gap-3">
           <Link
-            href="/factors"
+            href="/categories"
             className={cn(buttonVariants({ variant: "default" }))}
           >
+            Categories
+          </Link>
+          <Link
+            href="/drugs"
+            className={cn(buttonVariants({ variant: "default" }))}
+          >
+            Drugs
+          </Link>
+          <Link
+            href="/factors"
+            className={cn(buttonVariants({ variant: "outline" }))}
+          >
             Factor Registry
+          </Link>
+          <Link
+            href="/factor-sets"
+            className={cn(buttonVariants({ variant: "outline" }))}
+          >
+            Factor sets
           </Link>
           <Link
             href="/lookups"

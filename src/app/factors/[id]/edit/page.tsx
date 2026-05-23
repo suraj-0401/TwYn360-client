@@ -10,6 +10,7 @@ import {
   QueryErrorState,
 } from "@/components/feedback";
 import { DynamicFormSkeleton } from "@/renderer/components/dynamic-form-skeleton";
+import { FactorFactorSetsCard } from "@/modules/factors/components/factor-factor-sets-card";
 import { FactorDangerZone } from "@/modules/factors/components/factor-danger-zone";
 import { FactorGovernanceCard } from "@/modules/factors/components/factor-governance-card";
 import { FactorForm } from "@/modules/factors/components/factor-form";
@@ -94,6 +95,7 @@ export default function EditFactorPage({ params }: EditFactorPageProps) {
       {data && !error ? (
         <div className="space-y-8">
           {!builderMode ? <FactorGovernanceCard factor={data} /> : null}
+          {!builderMode ? <FactorFactorSetsCard factorId={id} /> : null}
 
           <FactorForm
             initial={data}

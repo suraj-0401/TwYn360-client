@@ -44,17 +44,41 @@ export function AppShell({ children, document: documentMode, wide }: AppShellPro
           </Link>
           <nav
             className={cn(
-              "flex items-center gap-4 text-sm",
+              "flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-sm",
               documentMode ? "text-[#f4f4f5]/70" : undefined,
             )}
           >
+            <Link
+              href="/categories"
+              className={cn(
+                documentMode ? "hover:text-[#f4f4f5]" : "hover:underline",
+              )}
+            >
+              Categories
+            </Link>
+            <Link
+              href="/drugs"
+              className={cn(
+                documentMode ? "hover:text-[#f4f4f5]" : "hover:underline",
+              )}
+            >
+              Drugs
+            </Link>
             <Link
               href="/factors"
               className={cn(
                 documentMode ? "hover:text-[#f4f4f5]" : "hover:underline",
               )}
             >
-              Factor Registry
+              Factors
+            </Link>
+            <Link
+              href="/factor-sets"
+              className={cn(
+                documentMode ? "hover:text-[#f4f4f5]" : "hover:underline",
+              )}
+            >
+              Factor sets
             </Link>
             <Link
               href="/lookups"

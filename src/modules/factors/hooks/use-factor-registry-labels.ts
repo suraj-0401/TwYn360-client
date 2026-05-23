@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { fetchLookupOptions } from "@/modules/lookups/utils/fetch-lookup-options";
-import { lookupQueryKey } from "@/modules/lookups/hooks/use-lookups";
+import { lookupQueryKey } from "@/modules/lookups/hooks/lookup-query-key";
 
 /** Load lookup labels once per unique collection (shared across columns/filters). */
 export function useFactorRegistryLabels(

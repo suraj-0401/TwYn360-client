@@ -21,6 +21,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getWorkspaceBySlug } from "@/services/workspace.service";
 import { useConfirm } from "@/components/feedback";
 import { env } from "@/config/env";
+import {
+  entityTypeSlugForWorkspace,
+  ENTITY_TYPE,
+  isEntityRecordWorkspaceSlug,
+  isProtectedEntityFieldKey,
+} from "@/config/platform";
+import { isProtectedFactorSetFieldKey } from "@/config/factor-set";
+import { toast } from "@/lib/toast";
 import { useDebouncedCallback } from "@/hooks/use-debounced-callback";
 import {
   applyWorkspaceMutation,
@@ -455,6 +463,19 @@ export function WorkspaceEditProvider({
         });
       },
       removeField: async (fieldId) => {
+        const field = sections
+          .flatMap((section) => section.fields)
+          .find((f) => f.id === fieldId);
+        if (
+          field &&
+          (isProtectedEntityFieldKey(workspaceSlug, field.fieldKey) ||
+            isProtectedFactorSetFieldKey(workspaceSlug, field.fieldKey))
+        ) {
+          toast.error(
+            "This field is required for record validation and cannot be removed.",
+          );
+          return;
+        }
         const ok = await confirm({
           title: "Remove field?",
           variant: "destructive",
@@ -489,8 +510,26 @@ export function WorkspaceEditProvider({
         });
       },
       publishLayout: () => {
+        const entityWorkspace = isEntityRecordWorkspaceSlug(workspaceSlug);
         void saveWorkspace(publishWorkspace(workspaceId, adminKey), {
-          successMessage: "Layout published",
+          successMessage: entityWorkspace
+            ? "Layout and validation schema published"
+            : "Layout published",
+        }).then(() => {
+          if (!entityWorkspace) {
+            return;
+          }
+          const entityType = entityTypeSlugForWorkspace(workspaceSlug);
+          if (!entityType) {
+            return;
+          }
+          void queryClient.invalidateQueries({
+            queryKey:
+              entityType === ENTITY_TYPE.CATEGORY ? ["categories"] : ["drugs"],
+          });
+          if (entityType === ENTITY_TYPE.CATEGORY) {
+            void queryClient.invalidateQueries({ queryKey: ["category-options"] });
+          }
         });
       },
       confirm,

@@ -12,14 +12,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "@/lib/toast";
-import { isLookupCollectionUuid } from "@/renderer/lookup-field.metadata";
-import {
-  deleteCollectionValue,
-  listCollectionValues,
-} from "@/services/lookup-collection.service";
-import { archiveLookupValue, getLookupValues } from "@/services/lookup.service";
+import { fetchLookupOptions } from "@/modules/lookups/utils/fetch-lookup-options";
+import { removeLookupCollectionValue } from "@/modules/lookups/utils/lookup-collection-mutations";
 import { collectionValuesQueryKey } from "../hooks/use-collection-values";
-import { lookupQueryKey } from "../hooks/use-lookups";
+import { lookupQueryKey } from "../hooks/lookup-query-key";
 
 type ManageLookupValuesModalProps = {
   collectionOrTypeCode: string;
@@ -33,7 +29,7 @@ type ManageLookupValuesModalProps = {
 
 type ManageRow = {
   rowKey: string;
-  valueId?: string;
+  valueId: string;
   code: string;
   label: string;
 };
@@ -49,23 +45,14 @@ export function ManageLookupValuesModal({
 }: ManageLookupValuesModalProps) {
   const queryClient = useQueryClient();
   const { confirm } = useConfirm();
-  const isCollection = isLookupCollectionUuid(collectionOrTypeCode);
 
   const valuesQuery = useQuery({
     queryKey: ["lookup-manage", collectionOrTypeCode],
     queryFn: async (): Promise<ManageRow[]> => {
-      if (isCollection) {
-        const response = await listCollectionValues(collectionOrTypeCode);
-        return response.data.map((item) => ({
-          rowKey: item.id,
-          valueId: item.id,
-          code: item.code,
-          label: item.label,
-        }));
-      }
-      const response = await getLookupValues(collectionOrTypeCode);
-      return response.data.map((item) => ({
-        rowKey: item.code,
+      const items = await fetchLookupOptions(collectionOrTypeCode);
+      return items.map((item) => ({
+        rowKey: item.valueId,
+        valueId: item.valueId,
         code: item.code,
         label: item.label,
       }));
@@ -74,15 +61,8 @@ export function ManageLookupValuesModal({
   });
 
   const removeMutation = useMutation({
-    mutationFn: async (row: ManageRow) => {
-      if (!adminKey) {
-        throw new Error("Admin API key is required to remove values.");
-      }
-      if (isCollection && row.valueId) {
-        return deleteCollectionValue(row.valueId, adminKey);
-      }
-      return archiveLookupValue(collectionOrTypeCode, row.code, adminKey);
-    },
+    mutationFn: async (row: ManageRow) =>
+      removeLookupCollectionValue(collectionOrTypeCode, row, adminKey),
     onSuccess: async (_res, row) => {
       await queryClient.invalidateQueries({
         queryKey: collectionValuesQueryKey(collectionOrTypeCode),
@@ -98,17 +78,15 @@ export function ManageLookupValuesModal({
       }
       toast.success("Value removed");
     },
-    onError: (err: Error) => {
-      toast.error(err.message);
-    },
+    onError: (err: Error) => toast.error(err.message),
   });
 
   async function handleRemove(row: ManageRow) {
     const ok = await confirm({
-      title: "Remove this option?",
-      description: `"${row.label}" (${row.code}) will be removed from this list. Existing records that already use this code are not changed.`,
-      variant: "destructive",
+      title: "Remove value?",
+      description: `Remove "${row.label}" from ${fieldLabel}?`,
       confirmLabel: "Remove",
+      variant: "destructive",
     });
     if (!ok) {
       return;
@@ -116,77 +94,61 @@ export function ManageLookupValuesModal({
     removeMutation.mutate(row);
   }
 
-  const rows = valuesQuery.data ?? [];
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Settings className="size-4" aria-hidden />
-            Manage values
+            Manage values — {fieldLabel}
           </DialogTitle>
-          <p className="text-sm text-muted-foreground">
-            {fieldLabel} — remove options that were added by mistake.
-          </p>
         </DialogHeader>
 
-        {!adminKey ? (
-          <p className="text-sm text-amber-700 dark:text-amber-400">
-            Set NEXT_PUBLIC_ADMIN_API_KEY in client/.env to match dff-service
-            ADMIN_API_KEY, then restart the dev server.
-          </p>
-        ) : null}
-
         {valuesQuery.isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading values…</p>
+          <p className="text-sm text-muted-foreground">Loading…</p>
         ) : null}
 
-        {valuesQuery.error ? (
-          <p className="text-sm text-destructive">
-            {valuesQuery.error instanceof Error
-              ? valuesQuery.error.message
-              : "Failed to load values"}
-          </p>
+        {valuesQuery.isError ? (
+          <p className="text-sm text-red-600">Could not load values.</p>
         ) : null}
 
-        {!valuesQuery.isLoading && !valuesQuery.error ? (
-          <ul className="max-h-64 space-y-1 overflow-y-auto rounded-md border p-1">
-            {rows.length === 0 ? (
-              <li className="px-3 py-4 text-center text-sm text-muted-foreground">
-                No values in this collection yet.
-              </li>
-            ) : (
-              rows.map((row) => (
-                <li
-                  key={row.rowKey}
-                  className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-muted/50"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{row.label}</p>
-                    <p className="truncate font-mono text-xs text-muted-foreground">
-                      {row.code}
-                    </p>
-                  </div>
+        {valuesQuery.data && valuesQuery.data.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No values in this list.</p>
+        ) : null}
+
+        {valuesQuery.data && valuesQuery.data.length > 0 ? (
+          <ul className="divide-y rounded-md border">
+            {valuesQuery.data.map((row) => (
+              <li
+                key={row.rowKey}
+                className="flex items-center justify-between gap-2 px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{row.label}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {row.code}
+                  </p>
+                </div>
+                {adminKey ? (
                   <Button
                     type="button"
                     variant="ghost"
-                    size="icon-sm"
-                    className="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                    disabled={!adminKey || removeMutation.isPending}
-                    aria-label={`Remove ${row.label}`}
+                    size="icon"
+                    className="shrink-0 text-muted-foreground hover:text-destructive"
+                    disabled={removeMutation.isPending}
                     onClick={() => void handleRemove(row)}
+                    aria-label={`Remove ${row.label}`}
                   >
                     <Trash2 className="size-4" />
                   </Button>
-                </li>
-              ))
-            )}
+                ) : null}
+              </li>
+            ))}
           </ul>
         ) : null}
 
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
             Close
           </Button>
         </DialogFooter>

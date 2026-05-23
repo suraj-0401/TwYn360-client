@@ -67,6 +67,48 @@ export async function listCollectionValues(
   return data;
 }
 
+export async function listCollectionValuesByCode(
+  code: string,
+): Promise<ApiSuccessResponse<LookupCollectionValue[]>> {
+  const { data } = await apiClient.get<
+    ApiSuccessResponse<LookupCollectionValue[]>
+  >(`/api/v1/lookup-collections/by-code/${encodeURIComponent(code)}/values`, {
+    skipGlobalErrorToast: true,
+  });
+  return data;
+}
+
+export async function createCollectionValueByCode(
+  code: string,
+  payload: CreateLookupCollectionValuePayload,
+  adminKey?: string,
+): Promise<ApiSuccessResponse<unknown>> {
+  const { data } = await apiClient.post<ApiSuccessResponse<unknown>>(
+    `/api/v1/lookup-collections/by-code/${encodeURIComponent(code)}/values`,
+    payload,
+    {
+      headers: adminKey ? { "x-admin-key": adminKey } : undefined,
+      skipGlobalErrorToast: true,
+    },
+  );
+  return data;
+}
+
+export async function archiveCollectionValue(
+  valueId: string,
+  adminKey?: string,
+): Promise<ApiSuccessResponse<unknown>> {
+  const { data } = await apiClient.patch<ApiSuccessResponse<unknown>>(
+    `/api/v1/admin/lookup-values/${valueId}/archive`,
+    {},
+    {
+      headers: adminKey ? { "x-admin-key": adminKey } : undefined,
+      skipGlobalErrorToast: true,
+    },
+  );
+  return data;
+}
+
 export async function deleteCollectionValue(
   valueId: string,
   adminKey?: string,

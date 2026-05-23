@@ -14,11 +14,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { isLookupCollectionUuid } from "@/renderer/lookup-field.metadata";
-import { createCollectionValue } from "@/services/lookup-collection.service";
-import { createLookupValue } from "@/services/lookup.service";
+import { createLookupCollectionValue } from "@/modules/lookups/utils/lookup-collection-mutations";
 import { collectionValuesQueryKey } from "../hooks/use-collection-values";
-import { lookupQueryKey } from "../hooks/use-lookups";
+import { lookupQueryKey } from "../hooks/lookup-query-key";
 
 type AddLookupModalProps = {
   typeCode: string;
@@ -39,22 +37,19 @@ export function AddLookupModal({
   const [code, setCode] = useState("");
   const [label, setLabel] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const isCollection = isLookupCollectionUuid(typeCode);
-
   const mutation = useMutation({
     mutationFn: async () => {
       const payload = { code: code.trim(), label: label.trim() };
-      if (isCollection) {
-        return createCollectionValue(typeCode, payload, adminKey);
-      }
-      return createLookupValue(typeCode, payload, adminKey);
+      return createLookupCollectionValue(typeCode, payload, adminKey);
     },
     onSuccess: async () => {
       const createdCode = code.trim();
-      const queryKey = isCollection
-        ? collectionValuesQueryKey(typeCode)
-        : lookupQueryKey(typeCode);
-      await queryClient.invalidateQueries({ queryKey });
+      await queryClient.invalidateQueries({
+        queryKey: collectionValuesQueryKey(typeCode),
+      });
+      await queryClient.invalidateQueries({
+        queryKey: lookupQueryKey(typeCode),
+      });
       setCode("");
       setLabel("");
       setError(null);

@@ -26,11 +26,14 @@ export type WorkspaceRendererProps = {
   values: Record<string, unknown>;
   onFieldChange: (fieldId: string, value: unknown) => void;
   adminKey?: string;
+  /** Hide workspace fields (e.g. categoryId rendered via CategoryRecordSelect). */
+  excludeFieldKeys?: string[];
   children?: React.ReactNode;
 };
 
 type WorkspaceSectionsProps = WorkspaceRendererProps & {
   workspacePayload?: FormDefinitionPayload;
+  excludeFieldKeys?: string[];
 };
 
 /** Clear drawer selection when leaving edit layout (provider stays mounted). */
@@ -47,6 +50,28 @@ function WorkspaceEditModeSync({ editEnabled }: { editEnabled: boolean }) {
   return null;
 }
 
+function filterWorkspacePayload(
+  payload: FormDefinitionPayload,
+  excludeFieldKeys: string[] | undefined,
+): FormDefinitionPayload {
+  if (!excludeFieldKeys?.length) {
+    return payload;
+  }
+  const exclude = new Set(excludeFieldKeys);
+  const fields = Object.fromEntries(
+    Object.entries(payload.fields).filter(([key]) => !exclude.has(key)),
+  );
+  const sections = payload.form.sections.map((section) => ({
+    ...section,
+    fields: section.fields.filter((fieldId) => !exclude.has(fieldId)),
+  }));
+  return {
+    ...payload,
+    fields,
+    form: { ...payload.form, sections },
+  };
+}
+
 function WorkspaceSections({
   workspaceSlug,
   editable,
@@ -54,15 +79,17 @@ function WorkspaceSections({
   onFieldChange,
   adminKey,
   workspacePayload,
-}: WorkspaceSectionsProps) {
+  excludeFieldKeys,
+}: WorkspaceSectionsProps & { excludeFieldKeys?: string[] }) {
   const edit = useWorkspaceEdit();
 
   const data = useMemo(() => {
-    if (edit?.payload) {
-      return edit.payload;
+    const base = edit?.payload ?? workspacePayload;
+    if (!base) {
+      return undefined;
     }
-    return workspacePayload;
-  }, [edit?.payload, workspacePayload]);
+    return filterWorkspacePayload(base, excludeFieldKeys);
+  }, [edit?.payload, workspacePayload, excludeFieldKeys]);
 
   if (!data) {
     return null;
@@ -121,6 +148,7 @@ export function WorkspaceRenderer({
   values,
   onFieldChange,
   adminKey,
+  excludeFieldKeys,
   children,
 }: WorkspaceRendererProps) {
   const queryClient = useQueryClient();
@@ -153,6 +181,7 @@ export function WorkspaceRenderer({
     values,
     onFieldChange,
     adminKey,
+    excludeFieldKeys,
     workspacePayload: workspaceQuery.data?.payload,
   };
 

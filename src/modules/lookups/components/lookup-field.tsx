@@ -18,9 +18,7 @@ import {
 } from "@/components/ui/select";
 import { formInputClass } from "@/renderer/form-styles";
 import { useWorkspaceEdit } from "@/renderer/context/workspace-edit-context";
-import { isLookupCollectionUuid } from "@/renderer/lookup-field.metadata";
-import { createCollectionValue } from "@/services/lookup-collection.service";
-import { createLookupValue } from "@/services/lookup.service";
+import { createLookupCollectionValue } from "@/modules/lookups/utils/lookup-collection-mutations";
 import {
   collectionValuesQueryKey,
   useCollectionValues,
@@ -89,14 +87,7 @@ export function LookupField({
   const createMutation = useMutation({
     mutationFn: async (draftLabel: string) => {
       const code = slugCode(draftLabel);
-      if (isLookupCollectionUuid(collectionId)) {
-        return createCollectionValue(
-          collectionId,
-          { code, label: draftLabel.trim() },
-          adminKey,
-        );
-      }
-      return createLookupValue(
+      return createLookupCollectionValue(
         collectionId,
         { code, label: draftLabel.trim() },
         adminKey,

@@ -11,6 +11,7 @@ import {
 import { DynamicFormSkeleton } from "@/renderer/components/dynamic-form-skeleton";
 import { buttonVariants } from "@/components/ui/button";
 import { FactorForm } from "@/modules/factors/components/factor-form";
+import { FactorFactorSetsCard } from "@/modules/factors/components/factor-factor-sets-card";
 import { FactorGovernanceCard } from "@/modules/factors/components/factor-governance-card";
 import { FactorPageHeader } from "@/modules/factors/components/factor-page-header";
 import { WORKSPACE_SLUGS } from "@/config/workspace";
@@ -77,6 +78,7 @@ export default function ViewFactorPage({ params }: ViewFactorPageProps) {
       {data && !error ? (
         <div className="space-y-8">
           <FactorGovernanceCard factor={data} />
+          <FactorFactorSetsCard factorId={id} />
           <FactorForm initial={data} readOnly onSubmit={async () => {}} submitLabel="" />
         </div>
       ) : null}

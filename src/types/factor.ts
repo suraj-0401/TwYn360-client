@@ -73,9 +73,6 @@ export interface FactorListResult {
   };
 }
 
-/** Workspace field id → value (from factor-form workspace definition). */
-export type FactorFormValues = Record<string, unknown>;
-
 export interface PermanentDeletePayload {
   confirmName: string;
 }
