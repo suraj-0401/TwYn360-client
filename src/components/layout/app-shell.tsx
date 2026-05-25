@@ -1,104 +1,20 @@
-import Link from "next/link";
-import { cn } from "@/lib/utils";
+import { DocumentShell } from "./document-shell";
 
 type AppShellProps = {
   children: React.ReactNode;
-  /** Full-width layout for form documents (factor create/edit view). */
+  /** @deprecated Use DocumentShell — kept for builder pages */
   document?: boolean;
-  /** Use full viewport width (metadata builder canvas). */
   wide?: boolean;
 };
 
-export function AppShell({ children, document: documentMode, wide }: AppShellProps) {
-  const containerClass = wide || documentMode ? "max-w-none" : "max-w-6xl";
-
-  return (
-    <div
-      className={cn(
-        "min-h-full",
-        documentMode ? "bg-[#0a0a0a]" : "bg-zinc-50 dark:bg-zinc-950",
-      )}
-    >
-      <header
-        className={cn(
-          "border-b",
-          documentMode
-            ? "border-white/[0.04] bg-[#0a0a0a]"
-            : "bg-white dark:bg-zinc-900",
-        )}
-      >
-        <div
-          className={cn(
-            "mx-auto flex h-14 items-center justify-between px-4 sm:px-6",
-            documentMode ? "max-w-[1000px]" : containerClass,
-          )}
-        >
-          <Link
-            href="/"
-            className={cn(
-              "font-semibold tracking-tight",
-              documentMode ? "text-[#f4f4f5]" : undefined,
-            )}
-          >
-            DFF Platform
-          </Link>
-          <nav
-            className={cn(
-              "flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-sm",
-              documentMode ? "text-[#f4f4f5]/70" : undefined,
-            )}
-          >
-            <Link
-              href="/categories"
-              className={cn(
-                documentMode ? "hover:text-[#f4f4f5]" : "hover:underline",
-              )}
-            >
-              Categories
-            </Link>
-            <Link
-              href="/drugs"
-              className={cn(
-                documentMode ? "hover:text-[#f4f4f5]" : "hover:underline",
-              )}
-            >
-              Drugs
-            </Link>
-            <Link
-              href="/factors"
-              className={cn(
-                documentMode ? "hover:text-[#f4f4f5]" : "hover:underline",
-              )}
-            >
-              Factors
-            </Link>
-            <Link
-              href="/factor-sets"
-              className={cn(
-                documentMode ? "hover:text-[#f4f4f5]" : "hover:underline",
-              )}
-            >
-              Factor sets
-            </Link>
-            <Link
-              href="/lookups"
-              className={cn(
-                documentMode ? "hover:text-[#f4f4f5]" : "hover:underline",
-              )}
-            >
-              Lookups
-            </Link>
-          </nav>
-        </div>
-      </header>
-      <main
-        className={cn(
-          "mx-auto",
-          documentMode ? "max-w-[1000px] px-4 pb-8 sm:px-6" : `px-4 py-8 ${containerClass}`,
-        )}
-      >
-        {children}
-      </main>
-    </div>
-  );
+/**
+ * Legacy export — maps to DocumentShell for focused editors.
+ * List/platform pages should use PlatformShell.
+ */
+export function AppShell({ children, document: _document, wide }: AppShellProps) {
+  return <DocumentShell wide={wide}>{children}</DocumentShell>;
 }
+
+export { DocumentShell } from "./document-shell";
+export { PlatformShell } from "./platform-shell";
+export { PlatformPageShell } from "./platform-page-shell";

@@ -22,7 +22,7 @@ export function FactorPageHeader({
 }: FactorPageHeaderProps) {
   return (
     <div className="sticky top-0 z-30 -mx-4 mb-5 border-b border-white/[0.04] bg-[#0a0a0a]/80 px-4 py-3 backdrop-blur-sm sm:-mx-0 sm:px-0">
-      <div className="mx-auto flex w-full max-w-[1000px] flex-wrap items-center justify-between gap-3">
+      <div className="flex w-full min-w-0 flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <h1 className="font-sans text-[15px] font-semibold tracking-tight text-[#f5f5f5]">
             {title}

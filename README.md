@@ -19,6 +19,12 @@ npm run start
 npm run lint
 ```
 
+## UI architecture
+
+Product shell and navigation contracts: [../docs/UI_ARCHITECTURE.md](../docs/UI_ARCHITECTURE.md) · Phase 0 checklist: [../docs/UI_PHASE0_CHECKLIST.md](../docs/UI_PHASE0_CHECKLIST.md)
+
+Nav config: `src/config/navigation/platform-nav.ts`
+
 ## Source layout
 
 ```

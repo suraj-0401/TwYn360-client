@@ -3,9 +3,10 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { AppShell } from "@/components/layout/app-shell";
+import { BuilderModeToggle } from "@/components/layout/builder-mode-toggle";
+import { PageHeader } from "@/components/layout/page-header";
+import { PlatformPageShell } from "@/components/layout/platform-page-shell";
 import { EntityRecordForm } from "@/modules/platform/components/entity-record-form";
-import { FactorPageHeader } from "@/modules/factors/components/factor-page-header";
 import { ENTITY_TYPE } from "@/config/platform";
 import { WORKSPACE_SLUGS } from "@/config/workspace";
 import { usePrefetchWorkspace } from "@/renderer/hooks/use-prefetch-workspace";
@@ -30,15 +31,27 @@ export default function NewCategoryPage() {
   }
 
   return (
-    <AppShell document>
-      <FactorPageHeader
+    <PlatformPageShell
+      domainId="registry"
+      breadcrumbs={[
+        { label: "Registry", href: "/categories" },
+        { label: "Categories", href: "/categories" },
+        { label: "New category" },
+      ]}
+      topbarActions={
+        adminKey ? (
+          <BuilderModeToggle
+            enabled={builderMode}
+            onChange={setBuilderMode}
+            variant="platform"
+          />
+        ) : null
+      }
+    >
+      <PageHeader
         title="New category"
-        subtitle="Define a therapeutic area or program grouping."
-        builderMode={builderMode}
-        onBuilderModeChange={setBuilderMode}
-        showBuilderToggle={Boolean(adminKey)}
+        description="Define a therapeutic area or program grouping."
       />
-
       <EntityRecordForm
         workspaceSlug={WORKSPACE_SLUGS.CATEGORY_FORM}
         submitLabel="Create category"
@@ -46,6 +59,6 @@ export default function NewCategoryPage() {
         adminKey={adminKey}
         editable={builderMode}
       />
-    </AppShell>
+    </PlatformPageShell>
   );
 }

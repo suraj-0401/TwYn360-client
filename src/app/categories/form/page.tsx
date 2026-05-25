@@ -1,13 +1,13 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { AppShell } from "@/components/layout/app-shell";
+import { useEffect } from "react";
+import { PageHeader } from "@/components/layout/page-header";
+import { PlatformPageShell } from "@/components/layout/platform-page-shell";
 import { EntityFormLayoutEditor } from "@/modules/platform/components/entity-form-layout-editor";
-import { FactorPageHeader } from "@/modules/factors/components/factor-page-header";
 import { WORKSPACE_SLUGS } from "@/config/workspace";
 import { env } from "@/config/env";
 import { usePrefetchWorkspace } from "@/renderer/hooks/use-prefetch-workspace";
-import { useEffect } from "react";
 
 export default function CategoryFormLayoutPage() {
   const router = useRouter();
@@ -26,18 +26,28 @@ export default function CategoryFormLayoutPage() {
   }
 
   return (
-    <AppShell document>
-      <FactorPageHeader
-        title="Category form layout"
-        subtitle="Edit sections and fields. Publish to sync validation with the category schema."
-        builderMode
-        onBuilderModeChange={() => {}}
-        showBuilderToggle={false}
-      />
-      <EntityFormLayoutEditor
+    <PlatformPageShell
+      domainId="registry"
+      breadcrumbs={[
+        { label: "Registry", href: "/categories" },
+        { label: "Categories", href: "/categories" },
+        { label: "Form layout" },
+      ]}
+      flush
+      fill
+    >
+      <div className="shrink-0 px-4 pt-4 md:px-6">
+        <PageHeader
+          title="Category form layout"
+          description="Edit sections and fields. Publish to sync validation with the category schema."
+        />
+      </div>
+      <div className="min-h-0 flex-1">
+        <EntityFormLayoutEditor
         workspaceSlug={WORKSPACE_SLUGS.CATEGORY_FORM}
         adminKey={adminKey}
-      />
-    </AppShell>
+        />
+      </div>
+    </PlatformPageShell>
   );
 }

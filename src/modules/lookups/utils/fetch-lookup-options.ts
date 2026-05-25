@@ -10,6 +10,7 @@ export type LookupOption = {
   label: string;
   description?: string | null;
   displayOrder?: number;
+  isSystem?: boolean;
   metadata?: unknown;
 };
 
@@ -31,6 +32,7 @@ export async function fetchLookupOptions(
     label: item.label,
     description: item.description,
     displayOrder: item.displayOrder,
+    isSystem: item.isSystem,
     metadata: item.metadata,
   }));
 }

@@ -3,11 +3,12 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
+import { BuilderModeToggle } from "@/components/layout/builder-mode-toggle";
+import { PageHeader } from "@/components/layout/page-header";
+import { PlatformPageShell } from "@/components/layout/platform-page-shell";
+import { FactorForm } from "@/modules/factors/components/factor-form";
 import { WORKSPACE_SLUGS } from "@/config/workspace";
 import { usePrefetchWorkspace } from "@/renderer/hooks/use-prefetch-workspace";
-import { AppShell } from "@/components/layout/app-shell";
-import { FactorForm } from "@/modules/factors/components/factor-form";
-import { FactorPageHeader } from "@/modules/factors/components/factor-page-header";
 import { env } from "@/config/env";
 import { toast } from "@/lib/toast";
 import { createFactor } from "@/services/factor.service";
@@ -29,20 +30,33 @@ export default function NewFactorPage() {
   }
 
   return (
-    <AppShell document>
-      <FactorPageHeader
+    <PlatformPageShell
+      domainId="registry"
+      breadcrumbs={[
+        { label: "Registry", href: "/factors" },
+        { label: "Factors", href: "/factors" },
+        { label: "New factor" },
+      ]}
+      topbarActions={
+        adminKey ? (
+          <BuilderModeToggle
+            enabled={builderMode}
+            onChange={setBuilderMode}
+            variant="platform"
+          />
+        ) : null
+      }
+    >
+      <PageHeader
         title="Create factor"
-        builderMode={builderMode}
-        onBuilderModeChange={setBuilderMode}
-        showBuilderToggle={Boolean(adminKey)}
+        description="Define and preview how this factor appears in your registry."
       />
-
       <FactorForm
         submitLabel="Create factor"
         onSubmit={handleSubmit}
         adminKey={adminKey}
         editable={builderMode}
       />
-    </AppShell>
+    </PlatformPageShell>
   );
 }

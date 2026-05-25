@@ -1,6 +1,8 @@
 "use client";
 
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
+import { platform } from "@/styles/tokens";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatApiError } from "@/lib/api-error";
 import { useCategoryOptions } from "../hooks/use-category-options";
@@ -10,6 +12,7 @@ type CategoryRecordSelectProps = {
   onChange: (value: string) => void;
   required?: boolean;
   label?: string;
+  variant?: "default" | "platform";
 };
 
 /** Simple async select for drug → category (Phase A7; not a generic reference framework). */
@@ -18,7 +21,9 @@ export function CategoryRecordSelect({
   onChange,
   required = false,
   label = "Category",
+  variant = "default",
 }: CategoryRecordSelectProps) {
+  const isPlatform = variant === "platform";
   const { data, isLoading, isError, error } = useCategoryOptions();
   const optionError = isError
     ? formatApiError(error, { resource: "categories" })
@@ -26,7 +31,7 @@ export function CategoryRecordSelect({
 
   return (
     <div className="space-y-1">
-      <Label>
+      <Label className={isPlatform ? platform.label : undefined}>
         {label}
         {required ? <span className="text-destructive"> *</span> : null}
       </Label>
@@ -34,7 +39,12 @@ export function CategoryRecordSelect({
         <Skeleton className="h-9 w-full" />
       ) : (
         <select
-          className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+          className={cn(
+            "h-9 w-full rounded-md border px-3 text-sm",
+            isPlatform
+              ? platform.select
+              : "border-input bg-transparent",
+          )}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           required={required}

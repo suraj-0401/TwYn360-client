@@ -19,6 +19,7 @@ export function useCollectionValues(collectionId: string) {
         label: item.label,
         description: item.description ?? null,
         displayOrder: item.displayOrder ?? 0,
+        isSystem: item.isSystem ?? false,
         metadata: item.metadata ?? null,
       }));
     },

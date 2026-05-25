@@ -1,50 +1,48 @@
 import Link from "next/link";
-import { AppShell } from "@/components/layout/app-shell";
+import { PlatformShell } from "@/components/layout/platform-shell";
+import { PageHeader } from "@/components/layout/page-header";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { platform } from "@/styles/tokens";
+
+const LINKS: { href: string; label: string; primary?: boolean }[] = [
+  { href: "/models", label: "Models", primary: true },
+  { href: "/factors", label: "Factor registry" },
+  { href: "/factor-sets", label: "Factor sets" },
+  { href: "/drugs", label: "Drugs" },
+  { href: "/categories", label: "Categories" },
+  { href: "/lookups", label: "Lookups" },
+];
 
 export default function Home() {
   return (
-    <AppShell>
-      <div className="rounded-lg border bg-white p-8 dark:bg-zinc-900">
-        <h1 className="text-3xl font-semibold">DFF Scientific Platform</h1>
-        <p className="mt-2 max-w-2xl text-muted-foreground">
-          Metadata-driven scientific workflow platform — categories, drugs,
-          factor registry, factor sets, and configurable workspaces.
-        </p>
-        <div className="mt-6 flex flex-wrap gap-3">
+    <PlatformShell
+      domainId="platform"
+      breadcrumbs={[{ label: "Control center" }]}
+    >
+      <PageHeader
+        title="Scientific control center"
+        description="Metadata-driven scientific workflow — categories, drugs, models, factor registry, and factor sets."
+      />
+      <div className="flex flex-wrap gap-2">
+        {LINKS.map((link) => (
           <Link
-            href="/categories"
-            className={cn(buttonVariants({ variant: "default" }))}
+            key={link.href}
+            href={link.href}
+            className={cn(
+              buttonVariants({
+                variant: link.primary ? "default" : "outline",
+                size: "sm",
+              }),
+              link.primary
+                ? platform.primaryButton
+                : "border-white/10 bg-transparent text-[#a1a1aa] hover:bg-white/[0.04] hover:text-[#f4f4f5]",
+            )}
           >
-            Categories
+            {link.label}
           </Link>
-          <Link
-            href="/drugs"
-            className={cn(buttonVariants({ variant: "default" }))}
-          >
-            Drugs
-          </Link>
-          <Link
-            href="/factors"
-            className={cn(buttonVariants({ variant: "outline" }))}
-          >
-            Factor Registry
-          </Link>
-          <Link
-            href="/factor-sets"
-            className={cn(buttonVariants({ variant: "outline" }))}
-          >
-            Factor sets
-          </Link>
-          <Link
-            href="/lookups"
-            className={cn(buttonVariants({ variant: "outline" }))}
-          >
-            Lookup collections
-          </Link>
-        </div>
+        ))}
       </div>
-    </AppShell>
+    </PlatformShell>
   );
 }

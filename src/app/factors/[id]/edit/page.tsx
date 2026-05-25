@@ -4,7 +4,9 @@ import { use, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AppShell } from "@/components/layout/app-shell";
+import { BuilderModeToggle } from "@/components/layout/builder-mode-toggle";
+import { PageHeader } from "@/components/layout/page-header";
+import { PlatformPageShell } from "@/components/layout/platform-page-shell";
 import {
   GovernanceCardSkeleton,
   QueryErrorState,
@@ -14,7 +16,6 @@ import { FactorFactorSetsCard } from "@/modules/factors/components/factor-factor
 import { FactorDangerZone } from "@/modules/factors/components/factor-danger-zone";
 import { FactorGovernanceCard } from "@/modules/factors/components/factor-governance-card";
 import { FactorForm } from "@/modules/factors/components/factor-form";
-import { FactorPageHeader } from "@/modules/factors/components/factor-page-header";
 import { buttonVariants } from "@/components/ui/button";
 import { WORKSPACE_SLUGS } from "@/config/workspace";
 import { cn } from "@/lib/utils";
@@ -39,10 +40,7 @@ export default function EditFactorPage({ params }: EditFactorPageProps) {
 
   const { data, isLoading, error, refetch, isRefetching } = useQuery({
     queryKey: ["factor", id],
-    queryFn: async () => {
-      const response = await getFactor(id);
-      return response.data;
-    },
+    queryFn: async () => (await getFactor(id)).data,
     staleTime: 60_000,
   });
 
@@ -57,24 +55,35 @@ export default function EditFactorPage({ params }: EditFactorPageProps) {
   const showFactorSkeleton = isLoading && !data;
 
   return (
-    <AppShell document>
-      <FactorPageHeader
-        title="Edit factor"
-        builderMode={builderMode}
-        onBuilderModeChange={setBuilderMode}
-        showBuilderToggle={Boolean(adminKey)}
-        actions={
+    <PlatformPageShell
+      domainId="registry"
+      breadcrumbs={[
+        { label: "Registry", href: "/factors" },
+        { label: "Factors", href: "/factors" },
+        { label: data?.displayName ?? "Edit factor" },
+      ]}
+      topbarActions={
+        <>
+          {adminKey ? (
+            <BuilderModeToggle
+              enabled={builderMode}
+              onChange={setBuilderMode}
+              variant="platform"
+            />
+          ) : null}
           <Link
             href={`/factors/${id}`}
             className={cn(
               buttonVariants({ variant: "outline", size: "sm" }),
-              "border-white/10 bg-transparent text-[#f4f4f5] hover:bg-white/5",
+              "border-white/10 bg-transparent text-[#a1a1aa] hover:bg-white/[0.04]",
             )}
           >
             View
           </Link>
-        }
-      />
+        </>
+      }
+    >
+      <PageHeader title="Edit factor" />
 
       {error ? (
         <QueryErrorState
@@ -93,10 +102,9 @@ export default function EditFactorPage({ params }: EditFactorPageProps) {
       ) : null}
 
       {data && !error ? (
-        <div className="space-y-8">
+        <div className="w-full space-y-8">
           {!builderMode ? <FactorGovernanceCard factor={data} /> : null}
           {!builderMode ? <FactorFactorSetsCard factorId={id} /> : null}
-
           <FactorForm
             initial={data}
             submitLabel="Save changes"
@@ -104,10 +112,9 @@ export default function EditFactorPage({ params }: EditFactorPageProps) {
             adminKey={adminKey}
             editable={builderMode}
           />
-
           {!builderMode ? <FactorDangerZone factor={data} /> : null}
         </div>
       ) : null}
-    </AppShell>
+    </PlatformPageShell>
   );
 }

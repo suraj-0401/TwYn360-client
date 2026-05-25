@@ -1,73 +1,111 @@
 "use client";
 
 import Link from "next/link";
+import { PlatformDataTable } from "@/components/data-table/platform-data-table";
+import type { DataTableColumn } from "@/components/data-table/data-table";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { buttonVariants } from "@/components/ui/button";
+  buildRegistryActionsColumn,
+  registryViewHref,
+} from "@/components/data-table/registry-actions-column";
+import { StatusBadge } from "@/components/data-table/status-badge";
 import { cn } from "@/lib/utils";
-import { formatLifecycleStatus } from "@/config/lifecycle";
 import { formatDateTime } from "@/lib/format-datetime";
+import { platform } from "@/styles/tokens";
 import type { EntityRecordListItemDto } from "@/types/entity-record";
 
 type DrugTableProps = {
   items: EntityRecordListItemDto[];
   categoryLabelById: Map<string, string>;
+  variant?: "default" | "platform";
 };
 
-export function DrugTable({ items, categoryLabelById }: DrugTableProps) {
-  return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Name</TableHead>
-          <TableHead>Category</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead>Updated</TableHead>
-          <TableHead className="text-right">Actions</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {items.map((row) => {
-          const categoryId =
-            typeof row.values.categoryId === "string"
-              ? row.values.categoryId
-              : "";
-          const categoryLabel = categoryId
-            ? (categoryLabelById.get(categoryId) ?? categoryId)
-            : "—";
+function buildColumns(
+  categoryLabelById: Map<string, string>,
+  variant: "default" | "platform",
+): DataTableColumn<EntityRecordListItemDto>[] {
+  const isPlatform = variant === "platform";
 
-          return (
-            <TableRow key={row.id}>
-              <TableCell className="font-medium">
-                {typeof row.values.name === "string"
-                  ? row.values.name
-                  : row.displayName ?? "—"}
-              </TableCell>
-              <TableCell>{categoryLabel}</TableCell>
-              <TableCell>
-                {formatLifecycleStatus(String(row.values.statusCode ?? ""))}
-              </TableCell>
-              <TableCell className="text-muted-foreground">
-                {formatDateTime(row.updatedAt)}
-              </TableCell>
-              <TableCell className="text-right">
-                <Link
-                  href={`/drugs/${row.id}/edit`}
-                  className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-                >
-                  Edit
-                </Link>
-              </TableCell>
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
+  const dataColumns: DataTableColumn<EntityRecordListItemDto>[] = [
+    {
+      id: "name",
+      header: "Drug",
+      cell: (row) => {
+        const name =
+          typeof row.values.name === "string"
+            ? row.values.name
+            : (row.displayName ?? "—");
+
+        return (
+          <div className="min-w-0 truncate font-medium text-[#f4f4f5]">
+            {name}
+          </div>
+        );
+      },
+    },
+    {
+      id: "category",
+      header: "Category",
+      className: isPlatform ? "text-[#71717a]" : undefined,
+      cell: (row) => {
+        const categoryId =
+          typeof row.values.categoryId === "string" ? row.values.categoryId : "";
+        return categoryId
+          ? (categoryLabelById.get(categoryId) ?? categoryId)
+          : "—";
+      },
+    },
+    {
+      id: "status",
+      header: "Status",
+      cell: (row) => (
+        <StatusBadge status={String(row.values.statusCode ?? row.status ?? "")} />
+      ),
+    },
+    {
+      id: "updated",
+      header: "Updated",
+      className: cn(
+        "whitespace-nowrap",
+        isPlatform ? "text-[#71717a]" : "text-muted-foreground",
+      ),
+      cell: (row) => formatDateTime(row.updatedAt),
+    },
+  ];
+
+  return [
+    ...dataColumns,
+    buildRegistryActionsColumn<EntityRecordListItemDto>((row) => {
+      const editHref = `/drugs/${row.id}/edit`;
+      return {
+        viewHref: registryViewHref(editHref),
+        editHref,
+        extra: {
+          label: "Models",
+          href: `/models?drugId=${encodeURIComponent(row.id)}`,
+        },
+      };
+    }),
+  ];
+}
+
+export function DrugTable({
+  items,
+  categoryLabelById,
+  variant = "platform",
+}: DrugTableProps) {
+  const columns = buildColumns(categoryLabelById, variant);
+
+  return (
+    <PlatformDataTable
+      columns={columns}
+      items={items}
+      getRowKey={(row) => row.id}
+      stickyHeader={variant === "platform"}
+      className={
+        variant !== "platform"
+          ? "[&_th]:normal-case [&_th]:tracking-normal"
+          : undefined
+      }
+    />
   );
 }

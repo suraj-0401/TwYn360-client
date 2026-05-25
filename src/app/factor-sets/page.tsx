@@ -4,7 +4,14 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { AppShell } from "@/components/layout/app-shell";
+import { PageHeader } from "@/components/layout/page-header";
+import { ContentCard } from "@/components/layout/content-card";
+import { FilterBar } from "@/components/layout/filter-bar";
+import { FilterField } from "@/components/layout/filter-field";
+import { RegistryListShell } from "@/components/layout/registry-list-shell";
+import { RegistryListCard } from "@/components/layout/registry-list-card";
+import { RegistryStatusSelect } from "@/components/layout/registry-status-select";
+import type { RegistryStatusFilter } from "@/components/layout/registry-status-select";
 import {
   EmptyState,
   FactorTableSkeleton,
@@ -12,20 +19,17 @@ import {
 } from "@/components/feedback";
 import { buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { FactorSetTable } from "@/modules/factor-sets/components/factor-set-table";
 import { LIFECYCLE_STATUS } from "@/config/lifecycle";
 import { listFactorSets } from "@/services/factor-set.service";
-
-type StatusFilter = typeof LIFECYCLE_STATUS.ACTIVE | typeof LIFECYCLE_STATUS.ARCHIVED | "all";
+import { cn } from "@/lib/utils";
+import { platform } from "@/styles/tokens";
 
 export default function FactorSetsPage() {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>(
+  const [statusFilter, setStatusFilter] = useState<RegistryStatusFilter>(
     LIFECYCLE_STATUS.ACTIVE,
   );
   const debouncedSearch = useDebouncedValue(searchInput);
@@ -61,55 +65,50 @@ export default function FactorSetsPage() {
   const showSkeleton = isLoading && !data;
 
   return (
-    <AppShell>
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">Factor sets</h1>
-          <p className="text-sm text-muted-foreground">
-            Reusable groupings of global registry factors (e.g. Demographics,
-            Renal).
-          </p>
-        </div>
-        <Link
-          href="/factor-sets/new"
-          className={cn(buttonVariants({ variant: "default" }))}
-        >
-          New factor set
-        </Link>
-      </div>
+    <RegistryListShell
+      breadcrumbs={[
+        { label: "Registry", href: "/factors" },
+        { label: "Factor sets" },
+      ]}
+      contextLine="Reusable groupings of global registry factors"
+    >
+      <PageHeader
+        title="Factor sets"
+        description="Demographics, Renal, Metabolic — attach to drug models in order."
+        actions={
+          <Link
+            href="/factor-sets/new"
+            className={cn(buttonVariants({ variant: "default" }), platform.primaryButton)}
+          >
+            New factor set
+          </Link>
+        }
+      />
 
-      <div className="mb-4 rounded-lg border bg-card p-4">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
-          <div className="max-w-md flex-1 space-y-1">
-            <Label htmlFor="search">Search</Label>
+      <ContentCard className="mb-4">
+        <FilterBar>
+          <FilterField id="factor-set-search" label="Search" className="max-w-md flex-1">
             <Input
-              id="search"
+              id="factor-set-search"
               placeholder="Search factor sets…"
               value={searchInput}
               onChange={(e) => {
                 setPage(1);
                 setSearchInput(e.target.value);
               }}
+              className={platform.input}
             />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="status">Status</Label>
-            <select
-              id="status"
-              className="flex h-9 w-full min-w-[140px] rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
-              value={statusFilter}
-              onChange={(e) => {
-                setPage(1);
-                setStatusFilter(e.target.value as StatusFilter);
-              }}
-            >
-              <option value={LIFECYCLE_STATUS.ACTIVE}>Active</option>
-              <option value={LIFECYCLE_STATUS.ARCHIVED}>Archived</option>
-              <option value="all">All</option>
-            </select>
-          </div>
-        </div>
-      </div>
+          </FilterField>
+          <RegistryStatusSelect
+            id="factor-set-status"
+            value={statusFilter}
+            onChange={(value) => {
+              setPage(1);
+              setStatusFilter(value);
+            }}
+          />
+        </FilterBar>
+      </ContentCard>
 
       {error ? (
         <QueryErrorState
@@ -126,61 +125,49 @@ export default function FactorSetsPage() {
       {showSkeleton ? <FactorTableSkeleton /> : null}
 
       {data && !error ? (
-        <>
-          {data.items.length === 0 ? (
-            <EmptyState
-              title="No factor sets found"
-              description={
-                debouncedSearch || statusFilter !== LIFECYCLE_STATUS.ACTIVE
-                  ? "Try different filters or search terms."
-                  : "Create a factor set to group registry factors."
-              }
-              action={
-                <Link
-                  href="/factor-sets/new"
-                  className={cn(buttonVariants({ variant: "default" }))}
-                >
-                  New factor set
-                </Link>
-              }
-            />
-          ) : (
-            <div
-              className={cn(
-                isFetching && !isLoading && "opacity-60 transition-opacity",
-              )}
-            >
-              <FactorSetTable items={data.items} />
-            </div>
-          )}
+        <RegistryListCard
+          total={data.pagination.total}
+          isFetching={isFetching}
+          isLoading={isLoading}
+          empty={
+            data.items.length === 0 ? (
+              <EmptyState
+                title="No factor sets found"
+                description={
+                  debouncedSearch || statusFilter !== LIFECYCLE_STATUS.ACTIVE
+                    ? "Try different filters or search terms."
+                    : "Create a factor set to group registry factors."
+                }
+                action={
+                  <Link
+                    href="/factor-sets/new"
+                    className={cn(
+                      buttonVariants({ variant: "default" }),
+                      platform.primaryButton,
+                    )}
+                  >
+                    New factor set
+                  </Link>
+                }
+              />
+            ) : undefined
+          }
+          pagination={
+            data.items.length > 0
+              ? {
+                  meta: data.pagination,
+                  page,
+                  onPageChange: setPage,
+                  isFetching,
+                }
+              : undefined
+          }
+        >
           {data.items.length > 0 ? (
-            <div className="mt-4 flex items-center justify-between">
-              <p className="text-sm text-muted-foreground">
-                Page {data.pagination.page} of {data.pagination.totalPages} (
-                {data.pagination.total} total)
-              </p>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  disabled={page <= 1 || isFetching}
-                  onClick={() => setPage((p) => Math.max(p - 1, 1))}
-                >
-                  Previous
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={
-                    page >= data.pagination.totalPages || isFetching
-                  }
-                  onClick={() => setPage((p) => p + 1)}
-                >
-                  Next
-                </Button>
-              </div>
-            </div>
+            <FactorSetTable items={data.items} variant="platform" />
           ) : null}
-        </>
+        </RegistryListCard>
       ) : null}
-    </AppShell>
+    </RegistryListShell>
   );
 }

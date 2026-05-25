@@ -8,7 +8,7 @@ type WorkspaceCanvasProps = {
 export function WorkspaceCanvas({ children, className }: WorkspaceCanvasProps) {
   return (
     <div
-      className={`mx-auto w-full max-w-[1000px] overflow-visible px-4 sm:px-6 ${className ?? ""}`}
+      className={`w-full min-w-0 max-w-none overflow-visible ${className ?? ""}`}
     >
       {children}
     </div>

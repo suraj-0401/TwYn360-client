@@ -1,19 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { AppShell } from "@/components/layout/app-shell";
-import { FactorPageHeader } from "@/modules/factors/components/factor-page-header";
+import { BuilderModeToggle } from "@/components/layout/builder-mode-toggle";
+import { PageHeader } from "@/components/layout/page-header";
+import { PlatformPageShell } from "@/components/layout/platform-page-shell";
 import { FactorSetForm } from "@/modules/factor-sets/components/factor-set-form";
 import type { FactorSetFormValues } from "@/modules/factor-sets/components/factor-set-form";
-import { FactorSetMembersSection } from "@/modules/factor-sets/components/factor-set-members-section";
+import { FactorSetMembersButton } from "@/modules/factor-sets/components/factor-set-members-button";
+import { FactorSetMembersModal } from "@/modules/factor-sets/components/factor-set-members-modal";
 import { WORKSPACE_SLUGS } from "@/config/workspace";
 import { usePrefetchWorkspace } from "@/renderer/hooks/use-prefetch-workspace";
 import { env } from "@/config/env";
-import { buttonVariants } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { toast } from "@/lib/toast";
 import {
   createFactorSet,
@@ -25,6 +24,7 @@ export default function NewFactorSetPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [builderMode, setBuilderMode] = useState(false);
+  const [membersOpen, setMembersOpen] = useState(false);
   const [pendingMembers, setPendingMembers] = useState<FactorSummary[]>([]);
   const adminKey = env.NEXT_PUBLIC_ADMIN_API_KEY;
 
@@ -45,40 +45,49 @@ export default function NewFactorSetPage() {
   }
 
   return (
-    <AppShell document>
-      <FactorPageHeader
+    <PlatformPageShell
+      domainId="registry"
+      breadcrumbs={[
+        { label: "Registry", href: "/factor-sets" },
+        { label: "Factor sets", href: "/factor-sets" },
+        { label: "New factor set" },
+      ]}
+      topbarActions={
+        adminKey ? (
+          <BuilderModeToggle
+            enabled={builderMode}
+            onChange={setBuilderMode}
+            variant="platform"
+          />
+        ) : null
+      }
+    >
+      <PageHeader
         title="New factor set"
-        subtitle="Define a reusable grouping of registry factors."
-        builderMode={builderMode}
-        onBuilderModeChange={setBuilderMode}
-        showBuilderToggle={Boolean(adminKey)}
+        description="Define a reusable grouping of registry factors."
         actions={
-          <Link
-            href="/factor-sets"
-            className={cn(
-              buttonVariants({ variant: "outline", size: "sm" }),
-              "border-white/10 bg-transparent text-[#f4f4f5] hover:bg-white/5",
-            )}
-          >
-            Cancel
-          </Link>
+          !builderMode ? (
+            <FactorSetMembersButton
+              memberCount={pendingMembers.length}
+              onClick={() => setMembersOpen(true)}
+            />
+          ) : null
         }
       />
+      <FactorSetForm
+        submitLabel="Create factor set"
+        onSubmit={handleSubmit}
+        adminKey={adminKey}
+        editable={builderMode}
+      />
 
-      <div className="space-y-6">
-        <FactorSetForm
-          submitLabel="Create factor set"
-          onSubmit={handleSubmit}
-          adminKey={adminKey}
-          editable={builderMode}
-        />
-
-        <FactorSetMembersSection
-          mode="draft"
-          members={pendingMembers}
-          onMembersChange={setPendingMembers}
-        />
-      </div>
-    </AppShell>
+      <FactorSetMembersModal
+        open={membersOpen}
+        onOpenChange={setMembersOpen}
+        mode="draft"
+        members={pendingMembers}
+        onMembersChange={setPendingMembers}
+      />
+    </PlatformPageShell>
   );
 }

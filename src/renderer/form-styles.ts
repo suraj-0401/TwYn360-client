@@ -8,7 +8,7 @@ export const formControlBorder = "border-white/[0.05]";
 
 /** Page shell — view and edit share one system. */
 export const formPageClass = cn(
-  "form-shell min-h-full font-sans text-[13px] text-[#e4e4e7]",
+  "form-shell min-h-full w-full min-w-0 font-sans text-[13px] text-[#e4e4e7]",
   formSurfaceBg,
 );
 

@@ -27,6 +27,10 @@ type FactorSetFormProps = {
   adminKey?: string;
   editable?: boolean;
   readOnly?: boolean;
+  formId?: string;
+  hideSubmitButton?: boolean;
+  layout?: "standalone" | "workspace";
+  onSavingChange?: (saving: boolean) => void;
 };
 
 export function FactorSetForm({
@@ -36,6 +40,10 @@ export function FactorSetForm({
   adminKey,
   editable = false,
   readOnly = false,
+  formId,
+  hideSubmitButton = false,
+  layout = "standalone",
+  onSavingChange,
 }: FactorSetFormProps) {
   const workspaceSlug = WORKSPACE_SLUGS.FACTOR_SET_FORM;
   const queryClient = useQueryClient();
@@ -87,6 +95,7 @@ export function FactorSetForm({
     }
 
     setSubmitting(true);
+    onSavingChange?.(true);
     setError(null);
 
     try {
@@ -101,8 +110,12 @@ export function FactorSetForm({
       );
     } finally {
       setSubmitting(false);
+      onSavingChange?.(false);
     }
   }
+
+  const isWorkspace = layout === "workspace";
+  const showInlineSubmit = !hideSubmitButton && !editable && !readOnly;
 
   const waitingForDefinition =
     definitionQuery.isLoading && !definitionQuery.data;
@@ -110,8 +123,14 @@ export function FactorSetForm({
   return (
     <FormReadOnlyProvider readOnly={readOnly}>
       <form
+        id={formId}
         onSubmit={readOnly ? (e) => e.preventDefault() : handleSubmit}
-        className={editable ? "space-y-6" : undefined}
+        className={cn(
+          editable ? "space-y-6" : undefined,
+          isWorkspace &&
+            !editable &&
+            "rounded-lg border border-white/[0.06] bg-[#111113] p-6",
+        )}
       >
         <WorkspaceRenderer
           workspaceSlug={workspaceSlug}
@@ -120,7 +139,7 @@ export function FactorSetForm({
           onFieldChange={readOnly ? () => {} : handleFieldChange}
           adminKey={adminKey}
         >
-          {!editable && !readOnly ? (
+          {showInlineSubmit ? (
             <div className="mt-10 flex flex-col gap-3 sm:flex-row sm:items-center">
               {error ? (
                 <p className="text-sm text-red-400">{error}</p>
@@ -141,6 +160,8 @@ export function FactorSetForm({
                 {submitLabel}
               </LoadingButton>
             </div>
+          ) : error && hideSubmitButton ? (
+            <p className="mt-6 text-sm text-red-400">{error}</p>
           ) : null}
         </WorkspaceRenderer>
       </form>

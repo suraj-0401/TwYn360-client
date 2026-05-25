@@ -4,7 +4,12 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { AppShell } from "@/components/layout/app-shell";
+import { PageHeader } from "@/components/layout/page-header";
+import { ContentCard } from "@/components/layout/content-card";
+import { FilterBar } from "@/components/layout/filter-bar";
+import { FilterField } from "@/components/layout/filter-field";
+import { RegistryListShell } from "@/components/layout/registry-list-shell";
+import { RegistryListCard } from "@/components/layout/registry-list-card";
 import {
   EmptyState,
   FactorTableSkeleton,
@@ -12,15 +17,13 @@ import {
 } from "@/components/feedback";
 import { buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { ENTITY_TYPE } from "@/config/platform";
-import { env } from "@/config/env";
 import { DrugTable } from "@/modules/platform/components/drug-table";
 import { CategoryRecordSelect } from "@/modules/platform/components/category-record-select";
 import { useCategoryLabelMap } from "@/modules/platform/hooks/use-category-options";
 import { listEntityRecords } from "@/services/entity-record.service";
+import { cn } from "@/lib/utils";
+import { platform } from "@/styles/tokens";
 
 export default function DrugsPage() {
   const queryClient = useQueryClient();
@@ -57,54 +60,51 @@ export default function DrugsPage() {
   const showSkeleton = isLoading && !data;
 
   return (
-    <AppShell>
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Drugs</h1>
-          <p className="text-sm text-muted-foreground">
-            Drug programs scoped under a category.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {env.NEXT_PUBLIC_ADMIN_API_KEY ? (
-            <Link
-              href="/drugs/form"
-              className={cn(buttonVariants({ variant: "outline" }))}
-            >
-              Customize form
-            </Link>
-          ) : null}
+    <RegistryListShell
+      breadcrumbs={[
+        { label: "Registry", href: "/factors" },
+        { label: "Drugs" },
+      ]}
+      contextLine="Drug programs scoped under therapeutic categories"
+    >
+      <PageHeader
+        title="Drugs"
+        description="Each drug can own multiple scientific models and factor set graphs."
+        actions={
           <Link
             href="/drugs/new"
-            className={cn(buttonVariants({ variant: "default" }))}
+            className={cn(buttonVariants({ variant: "default" }), platform.primaryButton)}
           >
             New drug
           </Link>
-        </div>
-      </div>
+        }
+      />
 
-      <div className="mb-4 grid gap-4 rounded-lg border bg-card p-4 sm:grid-cols-2">
-        <div className="space-y-1">
-          <Label htmlFor="search">Search</Label>
-          <Input
-            id="search"
-            placeholder="Search drugs…"
-            value={searchInput}
-            onChange={(e) => {
+      <ContentCard className="mb-4">
+        <FilterBar>
+          <FilterField id="drug-search" label="Search" className="max-w-md flex-1">
+            <Input
+              id="drug-search"
+              placeholder="Search drugs…"
+              value={searchInput}
+              onChange={(e) => {
+                setPage(1);
+                setSearchInput(e.target.value);
+              }}
+              className={platform.input}
+            />
+          </FilterField>
+          <CategoryRecordSelect
+            label="Category"
+            variant="platform"
+            value={categoryFilter}
+            onChange={(value) => {
               setPage(1);
-              setSearchInput(e.target.value);
+              setCategoryFilter(value);
             }}
           />
-        </div>
-        <CategoryRecordSelect
-          label="Filter by category"
-          value={categoryFilter}
-          onChange={(value) => {
-            setPage(1);
-            setCategoryFilter(value);
-          }}
-        />
-      </div>
+        </FilterBar>
+      </ContentCard>
 
       {error ? (
         <QueryErrorState
@@ -121,64 +121,53 @@ export default function DrugsPage() {
       {showSkeleton ? <FactorTableSkeleton /> : null}
 
       {data && !error ? (
-        <>
-          {data.items.length === 0 ? (
-            <EmptyState
-              title="No drugs found"
-              description={
-                debouncedSearch || categoryFilter
-                  ? "Try adjusting search or filters."
-                  : "Create your first drug under a category."
-              }
-              action={
-                <Link
-                  href="/drugs/new"
-                  className={cn(buttonVariants({ variant: "default" }))}
-                >
-                  New drug
-                </Link>
-              }
-            />
-          ) : (
-            <div
-              className={cn(
-                isFetching && !isLoading && "opacity-60 transition-opacity",
-              )}
-            >
-              <DrugTable
-                items={data.items}
-                categoryLabelById={categoryLabelById}
+        <RegistryListCard
+          total={data.pagination.total}
+          isFetching={isFetching}
+          isLoading={isLoading}
+          empty={
+            data.items.length === 0 ? (
+              <EmptyState
+                title="No drugs found"
+                description={
+                  debouncedSearch || categoryFilter
+                    ? "Try adjusting search or filters."
+                    : "Create your first drug under a category."
+                }
+                action={
+                  <Link
+                    href="/drugs/new"
+                    className={cn(
+                      buttonVariants({ variant: "default" }),
+                      platform.primaryButton,
+                    )}
+                  >
+                    New drug
+                  </Link>
+                }
               />
-            </div>
-          )}
+            ) : undefined
+          }
+          pagination={
+            data.items.length > 0
+              ? {
+                  meta: data.pagination,
+                  page,
+                  onPageChange: setPage,
+                  isFetching,
+                }
+              : undefined
+          }
+        >
           {data.items.length > 0 ? (
-            <div className="mt-4 flex items-center justify-between">
-              <p className="text-sm text-muted-foreground">
-                Page {data.pagination.page} of {data.pagination.totalPages} (
-                {data.pagination.total} total)
-              </p>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  disabled={page <= 1 || isFetching}
-                  onClick={() => setPage((p) => Math.max(p - 1, 1))}
-                >
-                  Previous
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={
-                    page >= data.pagination.totalPages || isFetching
-                  }
-                  onClick={() => setPage((p) => p + 1)}
-                >
-                  Next
-                </Button>
-              </div>
-            </div>
+            <DrugTable
+              items={data.items}
+              categoryLabelById={categoryLabelById}
+              variant="platform"
+            />
           ) : null}
-        </>
+        </RegistryListCard>
       ) : null}
-    </AppShell>
+    </RegistryListShell>
   );
 }

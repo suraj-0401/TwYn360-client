@@ -3,7 +3,8 @@
 import { use } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { AppShell } from "@/components/layout/app-shell";
+import { PageHeader } from "@/components/layout/page-header";
+import { PlatformPageShell } from "@/components/layout/platform-page-shell";
 import {
   GovernanceCardSkeleton,
   QueryErrorState,
@@ -13,7 +14,6 @@ import { buttonVariants } from "@/components/ui/button";
 import { FactorForm } from "@/modules/factors/components/factor-form";
 import { FactorFactorSetsCard } from "@/modules/factors/components/factor-factor-sets-card";
 import { FactorGovernanceCard } from "@/modules/factors/components/factor-governance-card";
-import { FactorPageHeader } from "@/modules/factors/components/factor-page-header";
 import { WORKSPACE_SLUGS } from "@/config/workspace";
 import { usePrefetchWorkspace } from "@/renderer/hooks/use-prefetch-workspace";
 import { cn } from "@/lib/utils";
@@ -30,33 +30,35 @@ export default function ViewFactorPage({ params }: ViewFactorPageProps) {
 
   const { data, isLoading, error, refetch, isRefetching } = useQuery({
     queryKey: ["factor", id],
-    queryFn: async () => {
-      const response = await getFactor(id);
-      return response.data;
-    },
+    queryFn: async () => (await getFactor(id)).data,
     staleTime: 60_000,
   });
 
   const showSkeleton = isLoading && !data;
 
   return (
-    <AppShell document>
-      <FactorPageHeader
+    <PlatformPageShell
+      domainId="registry"
+      breadcrumbs={[
+        { label: "Registry", href: "/factors" },
+        { label: "Factors", href: "/factors" },
+        { label: data?.displayName ?? "Factor" },
+      ]}
+      topbarActions={
+        <Link
+          href={`/factors/${id}/edit`}
+          className={cn(
+            buttonVariants({ variant: "outline", size: "sm" }),
+            "border-white/10 bg-transparent text-[#a1a1aa] hover:bg-white/[0.04]",
+          )}
+        >
+          Edit
+        </Link>
+      }
+    >
+      <PageHeader
         title={data?.displayName ?? "View factor"}
-        subtitle="Read-only preview from the factor workspace definition."
-        builderMode={false}
-        onBuilderModeChange={() => {}}
-        actions={
-          <Link
-            href={`/factors/${id}/edit`}
-            className={cn(
-              buttonVariants({ variant: "outline", size: "sm" }),
-              "border-white/10 bg-transparent text-[#f4f4f5] hover:bg-white/5",
-            )}
-          >
-            Edit
-          </Link>
-        }
+        description="Read-only preview from the factor workspace definition."
       />
 
       {error ? (
@@ -76,12 +78,12 @@ export default function ViewFactorPage({ params }: ViewFactorPageProps) {
       ) : null}
 
       {data && !error ? (
-        <div className="space-y-8">
+        <div className="w-full space-y-8">
           <FactorGovernanceCard factor={data} />
           <FactorFactorSetsCard factorId={id} />
           <FactorForm initial={data} readOnly onSubmit={async () => {}} submitLabel="" />
         </div>
       ) : null}
-    </AppShell>
+    </PlatformPageShell>
   );
 }

@@ -1,10 +1,15 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import Link from "next/link";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AppShell } from "@/components/layout/app-shell";
+import { PageHeader } from "@/components/layout/page-header";
+import { ContentCard } from "@/components/layout/content-card";
+import { FilterBar } from "@/components/layout/filter-bar";
+import { FilterField } from "@/components/layout/filter-field";
+import { RegistryListShell } from "@/components/layout/registry-list-shell";
+import { RegistryListCard } from "@/components/layout/registry-list-card";
 import {
   EmptyState,
   FactorTableSkeleton,
@@ -13,9 +18,6 @@ import {
 } from "@/components/feedback";
 import { buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { FactorRegistryTable } from "@/modules/factors/components/factor-registry-table";
 import { LookupSelect } from "@/modules/lookups/components/lookup-select";
 import { listFactors } from "@/services/factor.service";
@@ -27,6 +29,8 @@ import {
   buildFactorListColumns,
   listRegistryFilterFieldIds,
 } from "@/modules/factors/utils/factor-workspace-values";
+import { cn } from "@/lib/utils";
+import { platform } from "@/styles/tokens";
 
 export default function FactorsPage() {
   const workspaceSlug = WORKSPACE_SLUGS.FACTOR_REGISTRY;
@@ -83,7 +87,7 @@ export default function FactorsPage() {
       queryFn: async () => {
         const params: Record<string, string | number | undefined> = {
           page,
-          limit: 10,
+          limit: 20,
           search: debouncedSearch.trim() || undefined,
         };
         for (const field of filterFields) {
@@ -105,52 +109,57 @@ export default function FactorsPage() {
     filterFields.some((f) => Boolean(filters[f.fieldId]));
 
   return (
-    <AppShell>
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Factor Registry</h1>
-          <p className="text-sm text-muted-foreground">
-            Layout, fields, filters, and table columns come from the factor
-            workspace definition.
-          </p>
-        </div>
-        <Link
-          href="/factors/new"
-          className={cn(buttonVariants({ variant: "default" }))}
-        >
-          Create factor
-        </Link>
-      </div>
+    <RegistryListShell
+      breadcrumbs={[
+        { label: "Registry" },
+        { label: "Factors" },
+      ]}
+      contextLine="Global scientific factors · workspace-driven columns"
+    >
+      <PageHeader
+        title="Factor registry"
+        description="Layout, fields, filters, and table columns come from the factor workspace definition."
+        actions={
+          <Link
+            href="/factors/new"
+            className={cn(buttonVariants({ variant: "default" }), platform.primaryButton)}
+          >
+            Create factor
+          </Link>
+        }
+      />
 
       {showInitialSkeleton ? (
         <FiltersSkeleton />
       ) : (
-        <div className="mb-4 grid gap-3 rounded-lg border bg-card p-4 sm:grid-cols-2 lg:grid-cols-5">
-          <div className="space-y-1 lg:col-span-2">
-            <Label htmlFor="search">Search</Label>
-            <Input
-              id="search"
-              placeholder="Search factors…"
-              value={searchInput}
-              onChange={(e) => {
-                setPage(1);
-                setSearchInput(e.target.value);
-              }}
-            />
-          </div>
-          {filterFields.map((field) => (
-            <LookupSelect
-              key={field.fieldId}
-              typeCode={field.collectionId}
-              label={field.label}
-              value={filters[field.fieldId] ?? ""}
-              onChange={(value) => {
-                setPage(1);
-                setFilters((prev) => ({ ...prev, [field.fieldId]: value }));
-              }}
-            />
-          ))}
-        </div>
+        <ContentCard className="mb-4">
+          <FilterBar>
+            <FilterField id="factor-search" label="Search" className="max-w-md flex-1 lg:col-span-2">
+              <Input
+                id="factor-search"
+                placeholder="Search factors…"
+                value={searchInput}
+                onChange={(e) => {
+                  setPage(1);
+                  setSearchInput(e.target.value);
+                }}
+                className={platform.input}
+              />
+            </FilterField>
+            {filterFields.map((field) => (
+              <LookupSelect
+                key={field.fieldId}
+                typeCode={field.collectionId}
+                label={field.label}
+                value={filters[field.fieldId] ?? ""}
+                onChange={(value) => {
+                  setPage(1);
+                  setFilters((prev) => ({ ...prev, [field.fieldId]: value }));
+                }}
+              />
+            ))}
+          </FilterBar>
+        </ContentCard>
       )}
 
       {error ? (
@@ -168,65 +177,54 @@ export default function FactorsPage() {
       {showInitialSkeleton ? <FactorTableSkeleton /> : null}
 
       {data && !error ? (
-        <>
-          {data.items.length === 0 ? (
-            <EmptyState
-              title="No factors found"
-              description={
-                hasActiveFilters
-                  ? "Try adjusting your search or filters."
-                  : "Create your first global scientific factor."
-              }
-              action={
-                <Link
-                  href="/factors/new"
-                  className={cn(buttonVariants({ variant: "default" }))}
-                >
-                  Create factor
-                </Link>
-              }
-            />
-          ) : (
-            <div
-              className={cn(
-                isFetching && !isLoading && "opacity-60 transition-opacity",
-              )}
-            >
-              <FactorRegistryTable
-                items={data.items}
-                columns={columns}
-                labelsByFieldId={labelsByFieldId}
+        <RegistryListCard
+          total={data.pagination.total}
+          isFetching={isFetching}
+          isLoading={isLoading}
+          empty={
+            data.items.length === 0 ? (
+              <EmptyState
+                title="No factors found"
+                description={
+                  hasActiveFilters
+                    ? "Try adjusting your search or filters."
+                    : "Create your first global scientific factor."
+                }
+                action={
+                  <Link
+                    href="/factors/new"
+                    className={cn(
+                      buttonVariants({ variant: "default" }),
+                      platform.primaryButton,
+                    )}
+                  >
+                    Create factor
+                  </Link>
+                }
               />
-            </div>
-          )}
+            ) : undefined
+          }
+          pagination={
+            data.items.length > 0
+              ? {
+                  meta: data.pagination,
+                  page,
+                  onPageChange: setPage,
+                  isFetching,
+                }
+              : undefined
+          }
+        >
           {data.items.length > 0 ? (
-            <div className="mt-4 flex items-center justify-between">
-              <p className="text-sm text-muted-foreground">
-                Page {data.pagination.page} of {data.pagination.totalPages} (
-                {data.pagination.total} total)
-              </p>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  disabled={page <= 1 || isFetching}
-                  onClick={() => setPage((p) => Math.max(p - 1, 1))}
-                >
-                  Previous
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={
-                    page >= data.pagination.totalPages || isFetching
-                  }
-                  onClick={() => setPage((p) => p + 1)}
-                >
-                  Next
-                </Button>
-              </div>
-            </div>
+            <FactorRegistryTable
+              items={data.items}
+              columns={columns}
+              labelsByFieldId={labelsByFieldId}
+              variant="platform"
+            />
           ) : null}
-        </>
+        </RegistryListCard>
       ) : null}
-    </AppShell>
+    </RegistryListShell>
   );
 }

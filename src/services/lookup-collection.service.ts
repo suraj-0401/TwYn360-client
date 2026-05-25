@@ -1,11 +1,13 @@
 import { apiClient } from "@/lib/axios";
 import type { ApiSuccessResponse } from "@/types/api";
+import type { LookupCollectionOverview } from "@/types/lookup-overview";
 
 export type LookupCollection = {
   id: string;
   code: string;
   label: string;
   description: string | null;
+  category: string;
   isSystem: boolean;
   createdAt: string;
 };
@@ -16,7 +18,14 @@ export type LookupCollectionValue = {
   label: string;
   description: string | null;
   displayOrder: number;
+  isSystem: boolean;
   metadata: unknown;
+};
+
+export type UpdateLookupCollectionValuePayload = {
+  label?: string;
+  description?: string | null;
+  displayOrder?: number;
 };
 
 export type CreateLookupCollectionPayload = {
@@ -37,6 +46,41 @@ export async function listLookupCollections(): Promise<
   const { data } = await apiClient.get<ApiSuccessResponse<LookupCollection[]>>(
     "/api/v1/lookup-collections",
     { skipGlobalErrorToast: true },
+  );
+  return data;
+}
+
+export async function listLookupCollectionsOverview(): Promise<
+  ApiSuccessResponse<LookupCollectionOverview[]>
+> {
+  const { data } = await apiClient.get<
+    ApiSuccessResponse<LookupCollectionOverview[]>
+  >("/api/v1/lookup-collections/overview", { skipGlobalErrorToast: true });
+  return data;
+}
+
+export async function getLookupCollectionOverviewByCode(
+  code: string,
+): Promise<ApiSuccessResponse<LookupCollectionOverview | null>> {
+  const { data } = await apiClient.get<
+    ApiSuccessResponse<LookupCollectionOverview | null>
+  >(
+    `/api/v1/lookup-collections/by-code/${encodeURIComponent(code)}/overview`,
+    { skipGlobalErrorToast: true },
+  );
+  return data;
+}
+
+export async function deleteLookupCollection(
+  collectionId: string,
+  adminKey?: string,
+): Promise<ApiSuccessResponse<{ id: string }>> {
+  const { data } = await apiClient.delete<ApiSuccessResponse<{ id: string }>>(
+    `/api/v1/lookup-collections/${collectionId}`,
+    {
+      headers: adminKey ? { "x-admin-key": adminKey } : undefined,
+      skipGlobalErrorToast: true,
+    },
   );
   return data;
 }
@@ -101,6 +145,22 @@ export async function archiveCollectionValue(
   const { data } = await apiClient.patch<ApiSuccessResponse<unknown>>(
     `/api/v1/admin/lookup-values/${valueId}/archive`,
     {},
+    {
+      headers: adminKey ? { "x-admin-key": adminKey } : undefined,
+      skipGlobalErrorToast: true,
+    },
+  );
+  return data;
+}
+
+export async function updateCollectionValue(
+  valueId: string,
+  payload: UpdateLookupCollectionValuePayload,
+  adminKey?: string,
+): Promise<ApiSuccessResponse<unknown>> {
+  const { data } = await apiClient.put<ApiSuccessResponse<unknown>>(
+    `/api/v1/lookup-values/${valueId}`,
+    payload,
     {
       headers: adminKey ? { "x-admin-key": adminKey } : undefined,
       skipGlobalErrorToast: true,

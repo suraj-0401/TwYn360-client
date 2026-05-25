@@ -9,6 +9,7 @@ import {
   reorderFactorSetMembers,
 } from "@/services/factor-set.service";
 import { FactorPicker } from "./factor-picker";
+import { FactorSetMemberCards } from "./factor-set-member-cards";
 import {
   FactorSetMemberList,
   type FactorSetMemberRow,
@@ -57,6 +58,7 @@ type DraftFactorSetMembersSectionProps = {
   mode: "draft";
   members: FactorSummary[];
   onMembersChange: (members: FactorSummary[]) => void;
+  layout?: "default" | "workspace" | "modal";
 };
 
 type PersistedFactorSetMembersSectionProps = {
@@ -64,6 +66,7 @@ type PersistedFactorSetMembersSectionProps = {
   factorSetId: string;
   members: FactorSetMember[];
   readOnly?: boolean;
+  layout?: "default" | "workspace" | "modal";
 };
 
 export type FactorSetMembersSectionProps =
@@ -81,6 +84,7 @@ export function FactorSetMembersSection(props: FactorSetMembersSectionProps) {
 function DraftMembersSection({
   members,
   onMembersChange,
+  layout = "default",
 }: DraftFactorSetMembersSectionProps) {
   const rows: FactorSetMemberRow[] = members.map((factor) => ({
     factorId: factor.id,
@@ -126,6 +130,7 @@ function DraftMembersSection({
       excludeFactorIds={excludeFactorIds}
       onAdd={handleAdd}
       rows={rows}
+      layout={layout}
       onRemove={handleRemove}
       onMoveUp={(factorId) => handleMove(factorId, -1)}
       onMoveDown={(factorId) => handleMove(factorId, 1)}
@@ -137,6 +142,7 @@ function PersistedMembersSection({
   factorSetId,
   members,
   readOnly = false,
+  layout,
 }: PersistedFactorSetMembersSectionProps) {
   const queryClient = useQueryClient();
   const [busyFactorId, setBusyFactorId] = useState<string | null>(null);
@@ -208,6 +214,7 @@ function PersistedMembersSection({
       rows={rows}
       readOnly={readOnly}
       busyFactorId={busyFactorId}
+      layout={layout}
       onRemove={readOnly ? undefined : handleRemove}
       onMoveUp={readOnly ? undefined : (factorId) => handleReorder(factorId, -1)}
       onMoveDown={
@@ -226,6 +233,7 @@ type MembersSectionLayoutProps = {
   readOnly?: boolean;
   busyFactorId?: string | null;
   pickerDisabled?: boolean;
+  layout?: "default" | "workspace" | "modal";
   onRemove?: (factorId: string) => void;
   onMoveUp?: (factorId: string) => void;
   onMoveDown?: (factorId: string) => void;
@@ -239,12 +247,84 @@ function MembersSectionLayout({
   readOnly = false,
   busyFactorId = null,
   pickerDisabled = false,
+  layout = "default",
   onRemove,
   onMoveUp,
   onMoveDown,
 }: MembersSectionLayoutProps) {
+  const isWorkspace = layout === "workspace";
+  const isModal = layout === "modal";
+
+  if (isModal) {
+    return (
+      <div className="space-y-4">
+        {readOnly ? (
+          <p className="text-xs text-amber-400/90">
+            Archived sets are read-only.
+          </p>
+        ) : null}
+
+        {!readOnly ? (
+          <FactorPicker
+            excludeFactorIds={excludeFactorIds}
+            memberCount={memberCount}
+            onAdd={onAdd}
+            disabled={pickerDisabled}
+          />
+        ) : null}
+
+        <FactorSetMemberList
+          members={rows}
+          readOnly={readOnly}
+          busyFactorId={busyFactorId}
+          onRemove={onRemove}
+          onMoveUp={onMoveUp}
+          onMoveDown={onMoveDown}
+        />
+      </div>
+    );
+  }
+
+  if (isWorkspace) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight text-[#f4f4f5]">
+            Registry factors
+          </h2>
+          <p className="mt-1 text-sm text-[#71717a]">
+            Ordered members in this set ({memberCount} total).
+          </p>
+          {readOnly ? (
+            <p className="mt-2 text-xs text-amber-400/90">
+              Archived sets are read-only.
+            </p>
+          ) : null}
+        </div>
+
+        <FactorSetMemberCards
+          members={rows}
+          readOnly={readOnly}
+          busyFactorId={busyFactorId}
+          onRemove={onRemove}
+          onMoveUp={onMoveUp}
+          onMoveDown={onMoveDown}
+        />
+
+        {!readOnly ? (
+          <FactorPicker
+            excludeFactorIds={excludeFactorIds}
+            memberCount={memberCount}
+            onAdd={onAdd}
+            disabled={pickerDisabled}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
   return (
-    <div className="mx-auto w-full max-w-[1000px] space-y-4">
+    <div className="w-full space-y-4">
       <div className="rounded-lg border bg-card p-4">
         <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
           <div>
