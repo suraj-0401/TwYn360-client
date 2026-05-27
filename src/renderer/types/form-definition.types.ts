@@ -1,3 +1,4 @@
+import type { FieldProtectionLevel } from "@/config/field-protection";
 import type {
   FieldWidth,
   RendererFieldType,
@@ -5,6 +6,8 @@ import type {
   SectionColumns,
   VisibilityOperator,
 } from "./field-types";
+
+export type { FieldProtectionLevel };
 
 export interface VisibilityRule {
   dependsOn: string;
@@ -86,6 +89,8 @@ export interface FieldDefinition {
   id: string;
   fieldType: RendererFieldType;
   dataType?: ScientificDataType;
+  /** G1 — layout removability (from API or computed client-side). */
+  protection: FieldProtectionLevel;
   label: string;
   placeholder?: string;
   tooltip?: string;

@@ -2,12 +2,18 @@
 
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useConfirm } from "@/components/feedback";
+import {
+  MUTATION_SUCCESS_MESSAGE,
+  mutationConfirm,
+} from "@/config/mutation-labels";
 import { toast } from "@/lib/toast";
 import {
   addFactorSetMember,
   removeFactorSetMember,
   reorderFactorSetMembers,
 } from "@/services/factor-set.service";
+import { getFactorSetMemberRemoveImpact } from "@/services/governance-impact.service";
 import { FactorPicker } from "./factor-picker";
 import { FactorSetMemberCards } from "./factor-set-member-cards";
 import {
@@ -145,6 +151,7 @@ function PersistedMembersSection({
   layout,
 }: PersistedFactorSetMembersSectionProps) {
   const queryClient = useQueryClient();
+  const { confirm } = useConfirm();
   const [busyFactorId, setBusyFactorId] = useState<string | null>(null);
 
   const rows = useMemo(() => membersToRows(members), [members]);
@@ -188,11 +195,24 @@ function PersistedMembersSection({
     );
   }
 
-  function handleRemove(factorId: string) {
+  async function handleRemove(factorId: string) {
+    const member = rows.find((row) => row.factorId === factorId);
+    let impact;
+    try {
+      impact = (await getFactorSetMemberRemoveImpact(factorSetId, factorId)).data;
+    } catch {
+      impact = undefined;
+    }
+    const ok = await confirm(
+      mutationConfirm.removeFactorFromSet(member?.factor.displayName, impact),
+    );
+    if (!ok) {
+      return;
+    }
     void runMemberMutation(
       factorId,
       () => removeFactorSetMember(factorSetId, factorId),
-      "Factor removed from set",
+      MUTATION_SUCCESS_MESSAGE.factorRemovedFromSet,
     );
   }
 

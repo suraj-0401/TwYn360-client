@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { MUTATION_SUCCESS_MESSAGE } from "@/config/mutation-labels";
+import { formatApiError } from "@/lib/api-error";
 import { toast } from "@/lib/toast";
 import {
   addModelFactorSet,
@@ -55,6 +57,9 @@ export function useModelFactorSets(
     await queryClient.invalidateQueries({ queryKey: ["models", modelId] });
     void queryClient.invalidateQueries({ queryKey: ["models"] });
     void queryClient.invalidateQueries({ queryKey: ["drug-models"] });
+    void queryClient.invalidateQueries({
+      queryKey: ["model-factor-instances", modelId],
+    });
   }
 
   async function runLinkMutation(
@@ -67,6 +72,8 @@ export function useModelFactorSets(
       await action();
       toast.success(successMessage);
       await refreshModel();
+    } catch (err) {
+      toast.error(formatApiError(err).message);
     } finally {
       setBusyFactorSetId(null);
     }
@@ -76,15 +83,15 @@ export function useModelFactorSets(
     void runLinkMutation(
       set.id,
       () => addModelFactorSet(modelId, { factorSetId: set.id }),
-      "Factor set attached",
+      MUTATION_SUCCESS_MESSAGE.factorSetAttached,
     );
   }
 
-  function handleRemove(factorSetId: string) {
+  function handleDetach(factorSetId: string) {
     void runLinkMutation(
       factorSetId,
       () => removeModelFactorSet(modelId, factorSetId),
-      "Factor set removed",
+      MUTATION_SUCCESS_MESSAGE.factorSetDetached,
     );
   }
 
@@ -93,7 +100,7 @@ export function useModelFactorSets(
     void runLinkMutation(
       factorSetId,
       () => reorderModelFactorSets(modelId, { orderedFactorSetIds }),
-      "Factor set order updated",
+      MUTATION_SUCCESS_MESSAGE.factorSetOrderUpdated,
     );
   }
 
@@ -102,7 +109,7 @@ export function useModelFactorSets(
     excludeFactorSetIds,
     busyFactorSetId,
     handleAdd,
-    handleRemove,
+    handleDetach,
     handleReorder,
   };
 }

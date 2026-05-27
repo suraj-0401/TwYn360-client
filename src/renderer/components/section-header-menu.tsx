@@ -5,6 +5,7 @@ import { MoreVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BuilderTooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { isRemovableWorkspaceField } from "@/config/field-protection";
 import { useWorkspaceEdit } from "../context/workspace-edit-context";
 
 type SectionHeaderMenuProps = {
@@ -40,6 +41,13 @@ export function SectionHeaderMenu({
   if (!edit) {
     return null;
   }
+
+  const sectionRecord = edit.sections.find((s) => s.id === sectionId);
+  const canDelete = sectionRecord
+    ? sectionRecord.fields.every((f) =>
+        isRemovableWorkspaceField(edit.workspaceSlug, f.fieldKey),
+      )
+    : true;
 
   const menuItemClass =
     "flex w-full px-4 py-2 text-left text-[13px] text-[#e4e4e7] hover:bg-white/[0.06]";
@@ -126,17 +134,19 @@ export function SectionHeaderMenu({
               </div>
             ) : null}
           </div>
-          <button
-            type="button"
-            className="flex w-full px-4 py-2 text-left text-[13px] text-red-400 hover:bg-red-500/10"
-            role="menuitem"
-            onClick={() => {
-              edit.removeSection(sectionId);
-              setMenuOpen(false);
-            }}
-          >
-            Delete section
-          </button>
+          {canDelete ? (
+            <button
+              type="button"
+              className="flex w-full px-4 py-2 text-left text-[13px] text-red-400 hover:bg-red-500/10"
+              role="menuitem"
+              onClick={() => {
+                edit.removeSection(sectionId);
+                setMenuOpen(false);
+              }}
+            >
+              Delete section
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>

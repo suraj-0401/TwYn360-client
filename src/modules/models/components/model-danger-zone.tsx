@@ -2,17 +2,22 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle } from "lucide-react";
 import { useConfirm } from "@/components/feedback";
 import { LoadingButton } from "@/components/feedback/loaders/loading-button";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { canPermanentDeleteByLifecycle } from "@/config/governance";
 import {
   LIFECYCLE_STATUS,
   isArchivedLifecycle,
   isDeletedLifecycle,
 } from "@/config/lifecycle";
+import {
+  MUTATION_ACTION_LABEL,
+  MUTATION_HELP_COPY,
+  MUTATION_SUCCESS_MESSAGE,
+  mutationConfirm,
+} from "@/config/mutation-labels";
 import { getErrorMessage } from "@/lib/api-error";
 import { toast } from "@/lib/toast";
 import {
@@ -38,7 +43,7 @@ export function ModelDangerZone({ model }: ModelDangerZoneProps) {
   const isDeleted = isDeletedLifecycle(model.statusCode);
 
   const canPermanentDelete =
-    !isDeleted && !isActive && (isDraft || isArchived);
+    !isDeleted && canPermanentDeleteByLifecycle(model.statusCode);
 
   async function runAction(
     action: string,
@@ -60,29 +65,19 @@ export function ModelDangerZone({ model }: ModelDangerZoneProps) {
   }
 
   async function handleArchive() {
-    const ok = await confirm({
-      title: "Archive this workspace?",
-      description:
-        "The model will be hidden from new scientific use. Header and factor sets become read-only. You can restore later.",
-      confirmLabel: "Archive workspace",
-      variant: "default",
-    });
+    const ok = await confirm(mutationConfirm.archiveWorkspace());
     if (!ok) {
       return;
     }
     await runAction(
       "archive",
       () => archiveModel(model.id),
-      "Workspace archived",
+      MUTATION_SUCCESS_MESSAGE.workspaceArchived,
     );
   }
 
   async function handleRestore() {
-    const ok = await confirm({
-      title: "Restore to active?",
-      description: "The workspace returns to operational status.",
-      confirmLabel: "Restore",
-    });
+    const ok = await confirm(mutationConfirm.restoreWorkspace());
     if (!ok) {
       return;
     }
@@ -93,33 +88,29 @@ export function ModelDangerZone({ model }: ModelDangerZoneProps) {
           statusCode: LIFECYCLE_STATUS.ACTIVE,
           expectedVersion: model.version,
         }),
-      "Workspace restored to active",
+      MUTATION_SUCCESS_MESSAGE.workspaceRestored,
       `/models/${model.id}/edit`,
     );
   }
 
   async function handlePermanentDelete() {
-    const ok = await confirm({
-      title: `Delete “${model.displayName}”?`,
-      description:
-        "This workspace is not used by runtime jobs.\nThis marks the model as deleted and cannot be undone.",
-      confirmLabel: "Delete permanently",
-      variant: "destructive",
-    });
+    const ok = await confirm(
+      mutationConfirm.permanentlyRemoveWorkspace(model.displayName),
+    );
     if (!ok) {
       return;
     }
     await runAction(
-      "delete",
+      "permanentRemove",
       () => permanentDeleteModel(model.id, { confirmName }),
-      "Workspace deleted",
+      MUTATION_SUCCESS_MESSAGE.workspacePermanentlyRemoved,
     );
   }
 
   if (isDeleted) {
     return (
       <p className="text-sm text-[#71717a]">
-        This workspace is deleted and cannot be changed.
+        {MUTATION_HELP_COPY.workspacePermanentlyRemovedReadOnly}
       </p>
     );
   }
@@ -130,7 +121,7 @@ export function ModelDangerZone({ model }: ModelDangerZoneProps) {
         <div className="rounded-md border border-sky-500/20 bg-sky-500/[0.06] px-4 py-3 text-sm text-sky-100/90">
           <p className="font-medium">Active workspace</p>
           <p className="mt-1 text-sky-100/70">
-            Structural changes are locked. Archive before permanent delete.
+            {MUTATION_HELP_COPY.activeWorkspaceArchiveFirst}
           </p>
         </div>
       ) : null}
@@ -145,7 +136,7 @@ export function ModelDangerZone({ model }: ModelDangerZoneProps) {
             onClick={() => void handleArchive()}
             className="border-white/10 bg-transparent text-[#a1a1aa] hover:bg-white/[0.04]"
           >
-            Archive workspace
+            {MUTATION_ACTION_LABEL.archiveWorkspace}
           </LoadingButton>
         ) : null}
         {isArchived ? (
@@ -157,7 +148,7 @@ export function ModelDangerZone({ model }: ModelDangerZoneProps) {
             onClick={() => void handleRestore()}
             className="border-white/10 bg-transparent text-[#a1a1aa] hover:bg-white/[0.04]"
           >
-            Restore to active
+            {MUTATION_ACTION_LABEL.restoreToActive}
           </LoadingButton>
         ) : null}
       </div>
@@ -165,11 +156,10 @@ export function ModelDangerZone({ model }: ModelDangerZoneProps) {
       {canPermanentDelete ? (
         <div className="space-y-3 rounded-md border border-red-500/20 bg-red-500/[0.04] p-4">
           <p className="text-xs text-[#71717a]">
-            Permanent delete only when the workspace has no simulations or
-            runtime usage. Prefer archive when unsure.
+            {MUTATION_HELP_COPY.archiveBeforePermanentRemove}
           </p>
           <Label htmlFor="confirm-model-name">
-            Type <strong>{model.name}</strong> to delete permanently
+            {MUTATION_HELP_COPY.confirmNamePrompt(model.name)}
           </Label>
           <Input
             id="confirm-model-name"
@@ -181,17 +171,17 @@ export function ModelDangerZone({ model }: ModelDangerZoneProps) {
           <LoadingButton
             type="button"
             variant="destructive"
-            loading={loading === "delete"}
-            loadingText="Deleting…"
+            loading={loading === "permanentRemove"}
+            loadingText="Removing…"
             disabled={confirmName !== model.name}
             onClick={() => void handlePermanentDelete()}
           >
-            Delete permanently
+            {MUTATION_ACTION_LABEL.permanentlyRemove}
           </LoadingButton>
         </div>
       ) : isActive ? (
         <p className="text-sm text-[#71717a]">
-          Archive this workspace before permanent delete.
+          {MUTATION_HELP_COPY.activeWorkspaceArchiveFirst}
         </p>
       ) : null}
     </div>

@@ -1,3 +1,7 @@
+import {
+  FIELD_PROTECTION_LEVEL,
+  getFieldProtectionLevel,
+} from "@/config/field-protection";
 import { WORKSPACE_SLUGS, type WorkspaceSlug } from "@/config/workspace";
 
 /** Platform entity type slugs (must match dff-service seed). */
@@ -32,15 +36,15 @@ export const PROTECTED_ENTITY_FIELDS: Record<EntityTypeSlug, readonly string[]> 
   [ENTITY_TYPE.DRUG]: ["name", "statusCode", "categoryId"],
 };
 
+/** @deprecated Use `getFieldProtectionLevel` from `@/config/field-protection`. */
 export function isProtectedEntityFieldKey(
   workspaceSlug: string,
   fieldKey: string,
 ): boolean {
-  const entityType = entityTypeSlugForWorkspace(workspaceSlug);
-  if (!entityType) {
-    return false;
-  }
-  return PROTECTED_ENTITY_FIELDS[entityType].includes(fieldKey);
+  return (
+    getFieldProtectionLevel(workspaceSlug, fieldKey) ===
+    FIELD_PROTECTION_LEVEL.CORE
+  );
 }
 
 export {

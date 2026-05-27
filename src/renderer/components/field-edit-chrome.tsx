@@ -4,18 +4,27 @@ import { useEffect, useRef, useState } from "react";
 import { MoreVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import {
+  canRemoveWorkspaceField,
+  FIELD_PROTECTION_LEVEL,
+} from "@/config/field-protection";
 import { formFieldEditChromeClass } from "@/renderer/form-styles";
+import type { FieldProtectionLevel } from "@/renderer/types";
+import { FieldProtectionBadge } from "./field-protection-badge";
 import { useWorkspaceEdit } from "../context/workspace-edit-context";
 
 type FieldEditChromeProps = {
   sectionKey: string;
   fieldKey: string;
+  /** Canonical workspace field key (e.g. `dataTypeCode`), for badge display. */
+  layoutFieldKey?: string;
   fieldId: string;
   sectionId: string;
   fieldIndex: number;
   fieldCount: number;
   gridClassName?: string;
   disabled?: boolean;
+  protection?: FieldProtectionLevel;
   children: React.ReactNode;
 };
 
@@ -26,6 +35,8 @@ export function FieldEditChrome({
   fieldCount,
   gridClassName,
   disabled = false,
+  layoutFieldKey,
+  protection = FIELD_PROTECTION_LEVEL.CUSTOM,
   children,
 }: FieldEditChromeProps) {
   const edit = useWorkspaceEdit();
@@ -50,6 +61,7 @@ export function FieldEditChrome({
   }
 
   const selected = edit.selectedFieldId === fieldId;
+  const layoutRemovable = canRemoveWorkspaceField(protection);
   const menuItemClass =
     "flex w-full px-3 py-1.5 text-left text-[12px] text-[#e4e4e7] hover:bg-white/[0.06]";
 
@@ -69,6 +81,15 @@ export function FieldEditChrome({
       onKeyDown={() => {}}
       role="presentation"
     >
+      {layoutFieldKey ? (
+        <div className="mb-1.5 flex flex-wrap items-center gap-2 pr-8">
+          <code className="truncate text-[11px] text-[#71717a]">
+            {layoutFieldKey}
+          </code>
+          <FieldProtectionBadge protection={protection} />
+        </div>
+      ) : null}
+
       <div
         ref={menuRef}
         className={cn(
@@ -124,17 +145,28 @@ export function FieldEditChrome({
             >
               Move down
             </button>
-            <button
-              type="button"
-              className="flex w-full px-3 py-1.5 text-left text-[12px] text-red-400 hover:bg-red-500/10"
-              role="menuitem"
-              onClick={() => {
-                void edit.removeField(fieldId);
-                setMenuOpen(false);
-              }}
-            >
-              Delete field
-            </button>
+            {layoutRemovable ? (
+              <button
+                type="button"
+                className="flex w-full px-3 py-1.5 text-left text-[12px] text-red-400 hover:bg-red-500/10"
+                role="menuitem"
+                onClick={() => {
+                  void edit.removeField(fieldId);
+                  setMenuOpen(false);
+                }}
+              >
+                Remove field
+              </button>
+            ) : (
+              <p
+                className="px-3 py-2 text-[11px] leading-snug text-[#71717a]"
+                role="note"
+              >
+                {protection === FIELD_PROTECTION_LEVEL.SYSTEM
+                  ? "Locked system field"
+                  : "Core scientific field"}
+              </p>
+            )}
           </div>
         ) : null}
       </div>

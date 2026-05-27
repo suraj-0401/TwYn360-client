@@ -1,10 +1,10 @@
+import { FIELD_PROTECTION_LEVEL } from "@/config/field-protection";
 import type { FieldDefinition, FormDefinitionPayload } from "@/renderer/types";
 import type {
   CreateModelPayload,
   ModelDto,
   UpdateModelPayload,
 } from "@/types/model";
-import { isModelSystemFieldKey } from "./model-core-fields";
 
 export type ModelFormValues = {
   drugId: string;
@@ -23,8 +23,8 @@ function customValueToStored(value: unknown): unknown {
   return value;
 }
 
-function isCustomWorkspaceField(fieldId: string, def: FieldDefinition): boolean {
-  return !isModelSystemFieldKey(fieldId) && !isModelSystemFieldKey(def.id);
+function isCustomWorkspaceField(_fieldId: string, def: FieldDefinition): boolean {
+  return def.protection === FIELD_PROTECTION_LEVEL.CUSTOM;
 }
 
 export function emptyCustomValues(

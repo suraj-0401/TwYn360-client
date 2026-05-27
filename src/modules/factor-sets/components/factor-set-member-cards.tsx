@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ArrowDown, ArrowUp, ExternalLink, Trash2 } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { MUTATION_ACTION_LABEL } from "@/config/mutation-labels";
 import { cn } from "@/lib/utils";
 import { platform } from "@/styles/tokens";
 import type { FactorSetMemberRow } from "./factor-set-member-list";
@@ -104,8 +105,8 @@ export function FactorSetMemberCards({
                     className="border-red-500/20 text-red-400/90 hover:bg-red-500/10"
                     onClick={() => onRemove?.(member.factorId)}
                   >
-                    <Trash2 className="size-3.5" />
-                    Remove
+                    <Trash2 className="size-3.5" aria-hidden />
+                    {MUTATION_ACTION_LABEL.removeFromSet}
                   </Button>
                 </>
               ) : null}

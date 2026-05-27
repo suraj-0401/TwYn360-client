@@ -3,6 +3,7 @@ import {
   getFieldTypeEntry,
   normalizeFieldType,
 } from "@/renderer/field-metadata.registry";
+import { FIELD_PROTECTION_LEVEL } from "@/config/field-protection";
 import type { FieldConfig, FieldDefinition, RendererFieldType } from "@/renderer/types";
 import type {
   WorkspaceDetail,
@@ -86,6 +87,7 @@ export function applyOptimisticFieldAdd(
     id: rendererFieldId,
     fieldType,
     dataType: entry?.defaultDataType ?? "string",
+    protection: FIELD_PROTECTION_LEVEL.CUSTOM,
     label: input.label,
     required: false,
     config,

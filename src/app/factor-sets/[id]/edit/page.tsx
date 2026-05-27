@@ -15,6 +15,12 @@ import {
 } from "@/components/feedback";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useConfirm } from "@/components/feedback";
+import {
+  MUTATION_ACTION_LABEL,
+  MUTATION_SUCCESS_MESSAGE,
+  mutationConfirm,
+} from "@/config/mutation-labels";
 import { toast } from "@/lib/toast";
 import {
   formatLifecycleStatus,
@@ -36,6 +42,7 @@ import {
   getFactorSet,
   updateFactorSet,
 } from "@/services/factor-set.service";
+import { getFactorSetUsageImpact } from "@/services/governance-impact.service";
 
 type EditFactorSetPageProps = {
   params: Promise<{ id: string }>;
@@ -48,6 +55,7 @@ export default function EditFactorSetPage({ params }: EditFactorSetPageProps) {
   const [builderMode, setBuilderMode] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  const { confirm } = useConfirm();
   const [saving, setSaving] = useState(false);
   const adminKey = env.NEXT_PUBLIC_ADMIN_API_KEY;
 
@@ -73,18 +81,21 @@ export default function EditFactorSetPage({ params }: EditFactorSetPageProps) {
   }
 
   async function handleArchive() {
-    if (
-      !window.confirm(
-        "Archive this factor set? Membership changes will be disabled.",
-      )
-    ) {
+    let impact;
+    try {
+      impact = (await getFactorSetUsageImpact(id)).data;
+    } catch {
+      impact = undefined;
+    }
+    const ok = await confirm(mutationConfirm.archiveFactorSet(impact));
+    if (!ok) {
       return;
     }
 
     setArchiving(true);
     try {
       await archiveFactorSet(id);
-      toast.success("Factor set archived");
+      toast.success(MUTATION_SUCCESS_MESSAGE.factorSetArchived);
       void queryClient.invalidateQueries({ queryKey: ["factor-sets"] });
       void queryClient.invalidateQueries({ queryKey: ["factor-set", id] });
       router.push("/factor-sets");
@@ -148,7 +159,7 @@ export default function EditFactorSetPage({ params }: EditFactorSetPageProps) {
                 className="border-white/10 bg-transparent text-[#a1a1aa] hover:bg-white/[0.04]"
                 onClick={() => void handleArchive()}
               >
-                {archiving ? "Archiving…" : "Archive"}
+                {archiving ? "Archiving…" : MUTATION_ACTION_LABEL.archiveFactorSet}
               </Button>
             ) : null}
             <details className="relative">

@@ -15,11 +15,18 @@ import {
   permanentDeleteFactor,
   restoreFactor,
 } from "@/services/factor.service";
+import { getFactorUsageImpact } from "@/services/governance-impact.service";
 import {
   isArchivedLifecycle,
   isDeletedLifecycle,
   LIFECYCLE_STATUS,
 } from "@/config/lifecycle";
+import {
+  MUTATION_ACTION_LABEL,
+  MUTATION_HELP_COPY,
+  MUTATION_SUCCESS_MESSAGE,
+  mutationConfirm,
+} from "@/config/mutation-labels";
 import { useFactorFactorSets } from "@/modules/factors/hooks/use-factor-factor-sets";
 import type { Factor } from "@/types/factor";
 
@@ -42,6 +49,8 @@ export function FactorDangerZone({ factor }: FactorDangerZoneProps) {
   );
 
   const blockedByActiveSets = activeFactorSets.length > 0;
+  const blockedByActiveLifecycle =
+    !isDeleted && factor.statusCode === LIFECYCLE_STATUS.ACTIVE;
 
   async function runAction(
     action: string,
@@ -62,46 +71,52 @@ export function FactorDangerZone({ factor }: FactorDangerZoneProps) {
   }
 
   async function handleArchive() {
-    const ok = await confirm({
-      title: "Archive this factor?",
-      description: blockedByActiveSets
-        ? "Preferred over delete. It may remain in factor sets but will be hidden from new use. You can restore it later."
-        : "Preferred over permanent delete. It will be hidden from the registry. You can restore it later.",
-      confirmLabel: "Archive",
-      variant: "default",
-    });
-    if (!ok) {
-      return;
+    let impact;
+    try {
+      impact = (await getFactorUsageImpact(factor.id)).data;
+    } catch {
+      impact = undefined;
     }
-    await runAction("archive", () => archiveFactor(factor.id), "Factor archived");
-  }
-
-  async function handleRestore() {
-    const ok = await confirm({
-      title: "Restore this factor?",
-      description: "It will return to active status.",
-      confirmLabel: "Restore",
-    });
-    if (!ok) {
-      return;
-    }
-    await runAction("restore", () => restoreFactor(factor.id), "Factor restored");
-  }
-
-  async function handlePermanentDelete() {
-    const ok = await confirm({
-      title: "Permanently delete?",
-      description: "This cannot be undone. The record is kept for audit only.",
-      confirmLabel: "Delete permanently",
-      variant: "destructive",
-    });
+    const ok = await confirm(
+      mutationConfirm.archiveFactor(blockedByActiveSets, impact),
+    );
     if (!ok) {
       return;
     }
     await runAction(
-      "delete",
+      "archive",
+      () => archiveFactor(factor.id),
+      MUTATION_SUCCESS_MESSAGE.factorArchived,
+    );
+  }
+
+  async function handleRestore() {
+    const ok = await confirm(mutationConfirm.restoreFactor());
+    if (!ok) {
+      return;
+    }
+    await runAction(
+      "restore",
+      () => restoreFactor(factor.id),
+      MUTATION_SUCCESS_MESSAGE.factorRestored,
+    );
+  }
+
+  async function handlePermanentDelete() {
+    let impact;
+    try {
+      impact = (await getFactorUsageImpact(factor.id)).data;
+    } catch {
+      impact = undefined;
+    }
+    const ok = await confirm(mutationConfirm.permanentlyRemoveFactor(impact));
+    if (!ok) {
+      return;
+    }
+    await runAction(
+      "permanentRemove",
       () => permanentDeleteFactor(factor.id, { confirmName }),
-      "Factor deleted",
+      MUTATION_SUCCESS_MESSAGE.factorPermanentlyRemoved,
     );
   }
 
@@ -118,12 +133,10 @@ export function FactorDangerZone({ factor }: FactorDangerZoneProps) {
             className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100"
             role="alert"
           >
-            <p className="font-medium">Permanent delete is blocked</p>
+            <p className="font-medium">Permanent removal is blocked</p>
             <p className="mt-1 text-amber-900/80 dark:text-amber-100/80">
-              This factor is still in active factor set
-              {activeFactorSets.length === 1 ? "" : "s"}:{" "}
+              {MUTATION_HELP_COPY.factorPermanentRemoveBlocked} Active sets:{" "}
               {activeFactorSets.map((set) => set.displayName).join(", ")}.
-              Archive instead, or remove it from those sets before deleting.
             </p>
             <ul className="mt-2 space-y-1">
               {activeFactorSets.map((set) => (
@@ -148,9 +161,9 @@ export function FactorDangerZone({ factor }: FactorDangerZoneProps) {
                 variant="outline"
                 loading={loading === "archive"}
                 loadingText="Archiving..."
-                onClick={handleArchive}
+                onClick={() => void handleArchive()}
               >
-                Archive
+                {MUTATION_ACTION_LABEL.archiveFactor}
               </LoadingButton>
             ) : (
               <LoadingButton
@@ -158,22 +171,34 @@ export function FactorDangerZone({ factor }: FactorDangerZoneProps) {
                 variant="outline"
                 loading={loading === "restore"}
                 loadingText="Restoring..."
-                onClick={handleRestore}
+                onClick={() => void handleRestore()}
               >
-                Restore
+                {MUTATION_ACTION_LABEL.restore}
               </LoadingButton>
             )}
+          </div>
+        ) : null}
+
+        {blockedByActiveLifecycle ? (
+          <div
+            className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100"
+            role="alert"
+          >
+            <p className="font-medium">Permanent removal requires archive</p>
+            <p className="mt-1 text-amber-900/80 dark:text-amber-100/80">
+              Archive this factor first. Active factors cannot be permanently
+              removed.
+            </p>
           </div>
         ) : null}
 
         {!isDeleted ? (
           <div className="space-y-2 rounded-md border border-red-200 p-4 dark:border-red-900">
             <p className="text-xs text-muted-foreground">
-              Use <strong>Archive</strong> when possible. Permanent delete only
-              when this factor is not referenced.
+              {MUTATION_HELP_COPY.preferArchive}
             </p>
             <Label htmlFor="confirm-name">
-              Type <strong>{factor.name}</strong> to delete permanently
+              {MUTATION_HELP_COPY.confirmNamePrompt(factor.name)}
             </Label>
             <Input
               id="confirm-name"
@@ -184,17 +209,21 @@ export function FactorDangerZone({ factor }: FactorDangerZoneProps) {
             <LoadingButton
               type="button"
               variant="destructive"
-              loading={loading === "delete"}
-              loadingText="Deleting..."
-              disabled={blockedByActiveSets || confirmName !== factor.name}
-              onClick={handlePermanentDelete}
+              loading={loading === "permanentRemove"}
+              loadingText="Removing…"
+              disabled={
+                blockedByActiveSets ||
+                blockedByActiveLifecycle ||
+                confirmName !== factor.name
+              }
+              onClick={() => void handlePermanentDelete()}
             >
-              Permanent delete
+              {MUTATION_ACTION_LABEL.permanentlyRemove}
             </LoadingButton>
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">
-            This factor is deleted and cannot be changed.
+            {MUTATION_HELP_COPY.permanentlyRemovedReadOnly}
           </p>
         )}
       </CardContent>

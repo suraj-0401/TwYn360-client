@@ -65,6 +65,7 @@ export type FactorSetSummary = {
   description: string | null;
   statusCode: string;
   memberCount: number;
+  modelInstanceCount: number;
 };
 
 export type ModelFactorSetLink = {

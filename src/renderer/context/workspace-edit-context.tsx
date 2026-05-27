@@ -22,12 +22,16 @@ import { getWorkspaceBySlug } from "@/services/workspace.service";
 import { useConfirm } from "@/components/feedback";
 import { env } from "@/config/env";
 import {
-  entityTypeSlugForWorkspace,
+  canRemoveWorkspaceField,
+  FIELD_PROTECTION_LEVEL,
+  getFieldProtectionLevel,
+} from "@/config/field-protection";
+import {
   ENTITY_TYPE,
+  entityTypeSlugForWorkspace,
   isEntityRecordWorkspaceSlug,
-  isProtectedEntityFieldKey,
 } from "@/config/platform";
-import { isProtectedFactorSetFieldKey } from "@/config/factor-set";
+import { mutationConfirm } from "@/config/mutation-labels";
 import { toast } from "@/lib/toast";
 import { useDebouncedCallback } from "@/hooks/use-debounced-callback";
 import {
@@ -466,21 +470,25 @@ export function WorkspaceEditProvider({
         const field = sections
           .flatMap((section) => section.fields)
           .find((f) => f.id === fieldId);
-        if (
-          field &&
-          (isProtectedEntityFieldKey(workspaceSlug, field.fieldKey) ||
-            isProtectedFactorSetFieldKey(workspaceSlug, field.fieldKey))
-        ) {
-          toast.error(
-            "This field is required for record validation and cannot be removed.",
+        if (field) {
+          const protection = getFieldProtectionLevel(
+            workspaceSlug,
+            field.fieldKey,
           );
-          return;
+          if (!canRemoveWorkspaceField(protection)) {
+            const timestamp = new Date().toISOString();
+            console.warn(
+              `[governance] Blocked removal attempt (client): user=${adminKey ? "admin" : "unknown"} entity=${workspaceSlug} field=${field.fieldKey} protection=${protection} timestamp=${timestamp}`,
+            );
+            toast.error(
+              protection === FIELD_PROTECTION_LEVEL.SYSTEM
+                ? "Locked system fields cannot be removed from the layout."
+                : "Core scientific fields cannot be removed from the layout.",
+            );
+            return;
+          }
         }
-        const ok = await confirm({
-          title: "Remove field?",
-          variant: "destructive",
-          confirmLabel: "Remove",
-        });
+        const ok = await confirm(mutationConfirm.removeWorkspaceField());
         if (!ok) {
           return;
         }
@@ -491,12 +499,40 @@ export function WorkspaceEditProvider({
         });
       },
       removeSection: (sectionId) => {
-        setSelectedSectionId((prev) => (prev === sectionId ? null : prev));
-        setSelectedFieldId(null);
-        void saveWorkspace(deleteSection(sectionId, adminKey), {
-          silent: true,
-          optimistic: (current) => applyOptimisticSectionRemove(current, sectionId),
-        });
+        const section = sections.find((s) => s.id === sectionId);
+        if (section) {
+          const protectedField = section.fields.find(
+            (f) =>
+              !canRemoveWorkspaceField(
+                getFieldProtectionLevel(workspaceSlug, f.fieldKey),
+              ),
+          );
+          if (protectedField) {
+            const protection = getFieldProtectionLevel(
+              workspaceSlug,
+              protectedField.fieldKey,
+            );
+            toast.error(
+              protection === FIELD_PROTECTION_LEVEL.SYSTEM
+                ? "This section contains locked system fields and cannot be deleted."
+                : "This section contains core scientific fields and cannot be deleted.",
+            );
+            return;
+          }
+        }
+        void (async () => {
+          const ok = await confirm(mutationConfirm.removeWorkspaceSection());
+          if (!ok) {
+            return;
+          }
+          setSelectedSectionId((prev) => (prev === sectionId ? null : prev));
+          setSelectedFieldId(null);
+          void saveWorkspace(deleteSection(sectionId, adminKey), {
+            silent: true,
+            optimistic: (current) =>
+              applyOptimisticSectionRemove(current, sectionId),
+          });
+        })();
       },
       duplicateSection: (sectionId) => {
         if (sectionMutationInFlight.current.has(sectionId)) {

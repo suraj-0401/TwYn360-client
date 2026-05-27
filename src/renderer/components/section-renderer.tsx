@@ -29,6 +29,7 @@ import {
   resolveFieldTooltipForDisplay,
 } from "../utils/enrich-field-definition";
 import { EditableSectionHeader } from "./editable-section-header";
+import { getFieldProtectionLevel } from "@/config/field-protection";
 import { FieldEditChrome } from "./field-edit-chrome";
 import { FieldRenderer } from "./field-renderer";
 import { SectionAddFieldRow } from "./section-add-field-row";
@@ -191,6 +192,11 @@ export function SectionRenderer({
             const definition = editLayout
               ? enrichFieldDefinition(baseDefinition, fieldRecord)
               : resolveFieldTooltipForDisplay(baseDefinition);
+            const fieldProtection =
+              definition.protection ??
+              (fieldRecord && edit
+                ? getFieldProtectionLevel(edit.workspaceSlug, fieldRecord.fieldKey)
+                : definition.protection);
 
             if (editLayout && sectionDbId) {
               return (
@@ -199,11 +205,13 @@ export function SectionRenderer({
                   gridClassName={cn("group", fieldCellLayoutClass(definition))}
                   sectionKey={section.id}
                   fieldKey={fieldId}
+                  layoutFieldKey={fieldRecord?.fieldKey}
                   fieldId={fieldRecord?.id ?? fieldId}
                   sectionId={sectionDbId}
                   fieldIndex={fieldIndex}
                   fieldCount={visibleFieldIds.length}
                   disabled={!fieldRecord}
+                  protection={fieldProtection}
                 >
                   <FieldRenderer
                     definition={definition}

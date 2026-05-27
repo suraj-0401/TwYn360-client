@@ -11,11 +11,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/lib/toast";
 import { getErrorMessage } from "@/lib/api-error";
+import { canPermanentDeleteByLifecycle } from "@/config/governance";
 import {
   ENTITY_TYPE,
   isArchivedLifecycle,
   isDeletedLifecycle,
+  LIFECYCLE_STATUS,
 } from "@/config/platform";
+import {
+  MUTATION_ACTION_LABEL,
+  MUTATION_HELP_COPY,
+  MUTATION_SUCCESS_MESSAGE,
+  mutationConfirm,
+} from "@/config/mutation-labels";
 import {
   listCategoryDrugs,
   permanentDeleteCategory,
@@ -56,6 +64,11 @@ export function CategoryDangerZone({ category }: CategoryDangerZoneProps) {
 
   const activeDrugCount = linkedDrugs?.count ?? 0;
   const blockedByDrugs = activeDrugCount > 0;
+  const showPermanentDelete =
+    !isDeleted &&
+    (category.status === LIFECYCLE_STATUS.DRAFT || isArchived);
+  const blockedByActiveLifecycle =
+    !isDeleted && category.status === LIFECYCLE_STATUS.ACTIVE;
 
   async function runAction(
     action: string,
@@ -76,37 +89,26 @@ export function CategoryDangerZone({ category }: CategoryDangerZoneProps) {
   }
 
   async function handleArchive() {
-    const ok = await confirm({
-      title: "Archive this category?",
-      description:
-        "It will be hidden from new drug dropdowns. Existing drugs keep their category link.",
-      confirmLabel: "Archive",
-    });
+    const ok = await confirm(mutationConfirm.archiveCategory());
     if (!ok) {
       return;
     }
     await runAction(
       "archive",
       () => archiveEntityRecord(ENTITY_TYPE.CATEGORY, category.id),
-      "Category archived",
+      MUTATION_SUCCESS_MESSAGE.categoryArchived,
     );
   }
 
   async function handlePermanentDelete() {
-    const ok = await confirm({
-      title: "Permanently delete this category?",
-      description:
-        "This cannot be undone. The record is kept for audit only. Active drugs must be reassigned first.",
-      confirmLabel: "Delete permanently",
-      variant: "destructive",
-    });
+    const ok = await confirm(mutationConfirm.permanentlyRemoveCategory());
     if (!ok) {
       return;
     }
     await runAction(
-      "delete",
+      "permanentRemove",
       () => permanentDeleteCategory(category.id, { confirmName }),
-      "Category deleted",
+      MUTATION_SUCCESS_MESSAGE.categoryPermanentlyRemoved,
     );
   }
 
@@ -123,14 +125,15 @@ export function CategoryDangerZone({ category }: CategoryDangerZoneProps) {
             className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100"
             role="alert"
           >
-            <p className="font-medium">Permanent delete is blocked</p>
+            <p className="font-medium">Permanent removal is blocked</p>
             <p className="mt-1 text-amber-900/80 dark:text-amber-100/80">
-              This category is used by {activeDrugCount} active drug
+              {MUTATION_HELP_COPY.categoryPermanentRemoveBlocked} This category
+              is used by {activeDrugCount} active drug
               {activeDrugCount === 1 ? "" : "s"}
               {linkedDrugs?.items.length
                 ? `: ${linkedDrugs.items.map((drug) => drug.name).join(", ")}`
                 : ""}
-              . Archive instead; existing drugs stay readable.
+              .
             </p>
             {linkedDrugs?.items.length ? (
               <ul className="mt-2 space-y-1">
@@ -159,20 +162,32 @@ export function CategoryDangerZone({ category }: CategoryDangerZoneProps) {
                 loadingText="Archiving..."
                 onClick={() => void handleArchive()}
               >
-                Archive
+                {MUTATION_ACTION_LABEL.archiveCategory}
               </LoadingButton>
             ) : null}
           </div>
         ) : null}
 
-        {!isDeleted && !isArchived ? (
+        {blockedByActiveLifecycle ? (
+          <div
+            className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100"
+            role="alert"
+          >
+            <p className="font-medium">Permanent removal requires archive</p>
+            <p className="mt-1 text-amber-900/80 dark:text-amber-100/80">
+              Archive this category first. Active categories cannot be permanently
+              removed.
+            </p>
+          </div>
+        ) : null}
+
+        {showPermanentDelete ? (
           <div className="space-y-2 rounded-md border border-red-200 p-4 dark:border-red-900">
             <p className="text-xs text-muted-foreground">
-              Use <strong>Archive</strong> when possible. Permanent delete only
-              when no active drugs reference this category.
+              {MUTATION_HELP_COPY.preferArchive}
             </p>
             <Label htmlFor="confirm-category-name">
-              Type <strong>{displayName}</strong> to delete permanently
+              {MUTATION_HELP_COPY.confirmNamePrompt(displayName)}
             </Label>
             <Input
               id="confirm-category-name"
@@ -183,17 +198,17 @@ export function CategoryDangerZone({ category }: CategoryDangerZoneProps) {
             <LoadingButton
               type="button"
               variant="destructive"
-              loading={loading === "delete"}
-              loadingText="Deleting..."
+              loading={loading === "permanentRemove"}
+              loadingText="Removing…"
               disabled={blockedByDrugs || confirmName !== displayName}
               onClick={() => void handlePermanentDelete()}
             >
-              Permanent delete
+              {MUTATION_ACTION_LABEL.permanentlyRemove}
             </LoadingButton>
           </div>
         ) : isDeleted ? (
           <p className="text-sm text-muted-foreground">
-            This category is deleted and cannot be changed.
+            {MUTATION_HELP_COPY.permanentlyRemovedReadOnly}
           </p>
         ) : null}
       </CardContent>

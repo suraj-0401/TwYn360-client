@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { ArrowDown, ArrowUp, Trash2 } from "lucide-react";
+import { MUTATION_ACTION_LABEL } from "@/config/mutation-labels";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -104,7 +105,7 @@ export function FactorSetMemberList({
                       type="button"
                       size="icon-sm"
                       variant="ghost"
-                      aria-label="Remove"
+                      aria-label={MUTATION_ACTION_LABEL.removeFromSet}
                       disabled={busy}
                       onClick={() => onRemove?.(member.factorId)}
                     >

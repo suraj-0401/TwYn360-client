@@ -12,6 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { MUTATION_ACTION_LABEL } from "@/config/mutation-labels";
 import type { ModelFactorSetLink } from "@/types/model";
 
 export type ModelFactorSetRow = {
@@ -21,7 +22,7 @@ export type ModelFactorSetRow = {
 
 type ModelFactorSetListProps = {
   rows: ModelFactorSetRow[];
-  onRemove?: (factorSetId: string) => void;
+  onDetach?: (factorSetId: string) => void | Promise<void>;
   onMoveUp?: (factorSetId: string) => void;
   onMoveDown?: (factorSetId: string) => void;
   readOnly?: boolean;
@@ -31,7 +32,7 @@ type ModelFactorSetListProps = {
 
 export function ModelFactorSetList({
   rows,
-  onRemove,
+  onDetach,
   onMoveUp,
   onMoveDown,
   readOnly = false,
@@ -150,9 +151,9 @@ export function ModelFactorSetList({
                       type="button"
                       size="icon-sm"
                       variant="ghost"
-                      aria-label="Remove"
+                      aria-label={MUTATION_ACTION_LABEL.detachFactorSet}
                       disabled={busy}
-                      onClick={() => onRemove?.(row.factorSetId)}
+                      onClick={() => void onDetach?.(row.factorSetId)}
                     >
                       <Trash2 className="size-4" />
                     </Button>

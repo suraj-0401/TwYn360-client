@@ -55,7 +55,12 @@ export function FactorForm({
     gcTime: 10 * 60 * 1000,
   });
 
-  const fields = definitionQuery.data?.fields ?? {};
+  // Memoize fields so the object reference is stable — prevents the useEffect
+  // below from firing on every render when data is undefined (new {} each time).
+  const fields = useMemo(
+    () => definitionQuery.data?.fields ?? {},
+    [definitionQuery.data],
+  );
   const [values, setValues] = useState<FactorFormValues>(() =>
     initial && cachedDefinition
       ? factorToFormValues(initial, cachedDefinition.fields)
@@ -77,11 +82,15 @@ export function FactorForm({
     if (definitionQuery.isLoading && !definitionQuery.data) {
       return;
     }
+    // Use definitionQuery.data directly to avoid a stale closure on `fields`.
+    const currentFields = definitionQuery.data?.fields ?? {};
     setValues(
-      initial ? factorToFormValues(initial, fields) : emptyFormValues(fields),
+      initial
+        ? factorToFormValues(initial, currentFields)
+        : emptyFormValues(currentFields),
     );
     setReady(true);
-  }, [definitionQuery.isLoading, definitionQuery.data, initial, fields]);
+  }, [definitionQuery.isLoading, definitionQuery.data, initial]);
 
   function handleFieldChange(fieldId: string, value: unknown) {
     setValues((prev) => {

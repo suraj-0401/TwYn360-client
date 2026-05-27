@@ -6,13 +6,16 @@ import { StatusBadge } from "@/components/data-table/status-badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { platform } from "@/styles/tokens";
+import { MUTATION_ACTION_LABEL } from "@/config/mutation-labels";
+import { formatFactorSetLinkDescription } from "../utils/factor-set-lifecycle";
 import type { ModelFactorSetRow } from "./model-factor-set-list";
 
 type ModelFactorSetCardsProps = {
   rows: ModelFactorSetRow[];
   readOnly?: boolean;
+  graphLocked?: boolean;
   busyFactorSetId?: string | null;
-  onRemove?: (factorSetId: string) => void;
+  onDetach?: (factorSetId: string) => void | Promise<void>;
   onMoveUp?: (factorSetId: string) => void;
   onMoveDown?: (factorSetId: string) => void;
 };
@@ -20,8 +23,9 @@ type ModelFactorSetCardsProps = {
 export function ModelFactorSetCards({
   rows,
   readOnly = false,
+  graphLocked = false,
   busyFactorSetId = null,
-  onRemove,
+  onDetach,
   onMoveUp,
   onMoveDown,
 }: ModelFactorSetCardsProps) {
@@ -62,8 +66,7 @@ export function ModelFactorSetCards({
                 </div>
                 <p className="font-mono text-xs text-[#52525b]">{set.slug}</p>
                 <p className="mt-1 text-sm text-[#71717a]">
-                  {set.memberCount} factor{set.memberCount === 1 ? "" : "s"}
-                  {set.description ? ` · ${set.description}` : null}
+                  {formatFactorSetLinkDescription(set, graphLocked)}
                 </p>
               </div>
             </div>
@@ -111,10 +114,10 @@ export function ModelFactorSetCards({
                     variant="outline"
                     disabled={busy}
                     className="border-red-500/20 text-red-400/90 hover:bg-red-500/10"
-                    onClick={() => onRemove?.(row.factorSetId)}
+                    onClick={() => void onDetach?.(row.factorSetId)}
                   >
-                    <Trash2 className="size-3.5" />
-                    Remove
+                    <Trash2 className="size-3.5" aria-hidden />
+                    {MUTATION_ACTION_LABEL.detachFactorSet}
                   </Button>
                 </>
               ) : null}

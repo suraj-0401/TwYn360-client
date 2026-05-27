@@ -8,6 +8,7 @@ import { LIFECYCLE_STATUS } from "@/config/lifecycle";
 import type { ModelDto, UpdateModelPayload } from "@/types/model";
 import { useModelFactorSets } from "../hooks/use-model-factor-sets";
 import { ModelFactorSetsSection } from "./model-factor-sets-section";
+import { ModelFactorsSection } from "./model-factors-section";
 import { ModelForm } from "./model-form";
 import { ModelSettingsTab } from "./model-settings-tab";
 import {
@@ -33,7 +34,8 @@ export function ModelWorkspace({
   const factorSets = useModelFactorSets(model.id, model.factorSets);
 
   const isArchived = model.statusCode === LIFECYCLE_STATUS.ARCHIVED;
-  const graphLocked = model.statusCode !== LIFECYCLE_STATUS.DRAFT;
+  // Graph is mutable on draft AND active; only archived/deleted are locked.
+  const graphLocked = isArchived || model.statusCode === LIFECYCLE_STATUS.DELETED;
   const factorSetsReadOnly = readOnly || graphLocked;
   const formReadOnly = readOnly && !isArchived;
 
@@ -43,17 +45,6 @@ export function ModelWorkspace({
     }
     return "Save";
   }, [model.statusCode]);
-
-  function handleRemoveFactorSet(factorSetId: string) {
-    if (
-      !window.confirm(
-        "Remove this factor set from the model? The global factor set is not deleted.",
-      )
-    ) {
-      return;
-    }
-    factorSets.handleRemove(factorSetId);
-  }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -87,7 +78,15 @@ export function ModelWorkspace({
               graphLocked={graphLocked}
               layout="workspace"
               actions={factorSets}
-              onRemove={handleRemoveFactorSet}
+            />
+          ) : null}
+
+          {activeTab === "factors" ? (
+            <ModelFactorsSection
+              modelId={model.id}
+              readOnly={readOnly}
+              graphLocked={graphLocked}
+              layout="workspace"
             />
           ) : null}
 
