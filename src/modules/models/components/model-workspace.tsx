@@ -9,6 +9,7 @@ import type { ModelDto, UpdateModelPayload } from "@/types/model";
 import { useModelFactorSets } from "../hooks/use-model-factor-sets";
 import { ModelFactorSetsSection } from "./model-factor-sets-section";
 import { ModelFactorsSection } from "./model-factors-section";
+import { ModelFormulaTab } from "./model-formula-tab";
 import { ModelForm } from "./model-form";
 import { ModelSettingsTab } from "./model-settings-tab";
 import {
@@ -89,6 +90,8 @@ export function ModelWorkspace({
               layout="workspace"
             />
           ) : null}
+
+          {activeTab === "formula" ? <ModelFormulaTab modelId={model.id} /> : null}
 
           {activeTab === "settings" ? <ModelSettingsTab model={model} /> : null}
 

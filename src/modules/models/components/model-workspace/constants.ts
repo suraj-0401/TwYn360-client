@@ -6,6 +6,7 @@ export type ModelWorkspaceTabId =
   | "overview"
   | "factor-sets"
   | "factors"
+  | "formula"
   | "settings"
   | "audit";
 
@@ -13,6 +14,7 @@ export const MODEL_WORKSPACE_TABS: WorkspaceTabItem[] = [
   { id: "overview", label: "Overview" },
   { id: "factor-sets", label: "Factor sets" },
   { id: "factors", label: "Factors" },
+  { id: "formula", label: "Formula" },
   { id: "settings", label: "Settings" },
   { id: "audit", label: "Audit" },
 ];
