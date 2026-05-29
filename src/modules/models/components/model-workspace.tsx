@@ -85,13 +85,18 @@ export function ModelWorkspace({
           {activeTab === "factors" ? (
             <ModelFactorsSection
               modelId={model.id}
-              readOnly={readOnly}
+              readOnly={readOnly || graphLocked}
               graphLocked={graphLocked}
               layout="workspace"
             />
           ) : null}
 
-          {activeTab === "formula" ? <ModelFormulaTab modelId={model.id} /> : null}
+          {activeTab === "formula" ? (
+            <ModelFormulaTab
+              modelId={model.id}
+              readOnly={graphLocked}
+            />
+          ) : null}
 
           {activeTab === "settings" ? <ModelSettingsTab model={model} /> : null}
 

@@ -1,30 +1,50 @@
 import { apiClient } from "@/lib/axios";
 import type { ApiSuccessResponse } from "@/types/api";
-import type { FormulaDto, FormulaVersionDto } from "@/types/formula";
+import type { FormulaDto, FormulaTargetType, FormulaVersionDto } from "@/types/formula";
 
 type CreateFormulaPayload = {
-  targetInstanceId: string;
   modelId: string;
   formulaType: string;
-  framework: string;
+  framework?: string;
   rawExpression: string;
   aliasMap?: Record<string, string>;
   manualMode?: boolean;
+  targetType?: FormulaTargetType;
+  targetId?: string;
+  formulaKind?: string;
+  /** Legacy bridge */
+  targetInstanceId?: string;
 };
 
 type UpdateFormulaPayload = {
   rawExpression?: string;
   aliasMap?: Record<string, string>;
   manualMode?: boolean;
+  framework?: string | null;
   expectedVersion?: number;
 };
 
-export async function getFormulaByInstance(modelId: string, instanceId: string) {
-  const { data } = await apiClient.get<ApiSuccessResponse<FormulaDto>>(
-    `/api/v1/models/${modelId}/factor-instances/${instanceId}/formula`,
+export async function getFormulaByTarget(
+  modelId: string,
+  targetType: FormulaTargetType,
+  targetId: string,
+) {
+  const pathByTarget: Record<FormulaTargetType, string> = {
+    outcome: `/api/v1/models/${modelId}/outcomes/${targetId}/formula`,
+    derived_factor: `/api/v1/models/${modelId}/derived-factors/${targetId}/formula`,
+    factor_instance: `/api/v1/models/${modelId}/factor-instances/${targetId}/formula`,
+  };
+
+  const { data } = await apiClient.get<ApiSuccessResponse<FormulaDto | null>>(
+    pathByTarget[targetType],
     { skipGlobalErrorToast: true },
   );
   return data;
+}
+
+/** Legacy helper — factor instance formulas. */
+export async function getFormulaByInstance(modelId: string, instanceId: string) {
+  return getFormulaByTarget(modelId, "factor_instance", instanceId);
 }
 
 export async function createFormula(modelId: string, payload: CreateFormulaPayload) {

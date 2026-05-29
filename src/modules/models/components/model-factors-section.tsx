@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Settings2 } from "lucide-react";
+import { WorkspaceTabs } from "@/components/layout/workspace-tabs";
 import {
   DataTable,
   type DataTableColumn,
@@ -22,8 +23,16 @@ import {
   preservedFactorsTabBanner,
 } from "../utils/factor-set-lifecycle";
 import { ModelFactorInstanceConfigureDialog } from "./model-factor-instance-configure-dialog";
+import { ModelDerivedFactorsPanel } from "./model-derived-factors-panel";
 import type { ResolvedModelFactorInstance } from "@/types/model-factor-instance";
 import { StatusBadge } from "@/components/data-table/status-badge";
+
+type FactorsSubTabId = "raw" | "derived";
+
+const FACTORS_SUB_TABS = [
+  { id: "raw" as const, label: "Raw" },
+  { id: "derived" as const, label: "Derived" },
+];
 
 type ModelFactorsSectionProps = {
   modelId: string;
@@ -42,11 +51,11 @@ function formatCell(value: unknown): string {
   return String(value);
 }
 
-export function ModelFactorsSection({
+function ModelRawFactorsPanel({
   modelId,
-  readOnly = false,
-  graphLocked = false,
-  layout = "workspace",
+  readOnly,
+  graphLocked,
+  layout,
 }: ModelFactorsSectionProps) {
   const { data, isLoading, error, refetch, isRefetching } =
     useModelFactorInstances(modelId);
@@ -237,17 +246,9 @@ export function ModelFactorsSection({
   return (
     <div className="space-y-6">
       <div>
-        <h2
-          className={cn(
-            "text-lg font-semibold tracking-tight",
-            isWorkspace ? "text-[#f4f4f5]" : undefined,
-          )}
-        >
-          Model factors
-        </h2>
         <p
           className={cn(
-            "mt-1 text-sm",
+            "text-sm",
             isWorkspace ? "text-[#71717a]" : "text-muted-foreground",
           )}
         >
@@ -295,6 +296,61 @@ export function ModelFactorsSection({
         readOnly={readOnly}
         onSave={saveOverrides}
       />
+    </div>
+  );
+}
+
+export function ModelFactorsSection({
+  modelId,
+  readOnly = false,
+  graphLocked = false,
+  layout = "workspace",
+}: ModelFactorsSectionProps) {
+  const [activeSubTab, setActiveSubTab] = useState<FactorsSubTabId>("raw");
+  const isWorkspace = layout === "workspace";
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2
+          className={cn(
+            "text-lg font-semibold tracking-tight",
+            isWorkspace ? "text-[#f4f4f5]" : undefined,
+          )}
+        >
+          Model factors
+        </h2>
+        <p
+          className={cn(
+            "mt-1 text-sm",
+            isWorkspace ? "text-[#71717a]" : "text-muted-foreground",
+          )}
+        >
+          Raw registry factors and derived computed aliases for this model.
+        </p>
+      </div>
+
+      <WorkspaceTabs
+        tabs={[...FACTORS_SUB_TABS]}
+        activeId={activeSubTab}
+        onChange={(id) => setActiveSubTab(id as FactorsSubTabId)}
+        className="rounded-lg border border-white/[0.06]"
+      />
+
+      {activeSubTab === "raw" ? (
+        <ModelRawFactorsPanel
+          modelId={modelId}
+          readOnly={readOnly}
+          graphLocked={graphLocked}
+          layout={layout}
+        />
+      ) : (
+        <ModelDerivedFactorsPanel
+          modelId={modelId}
+          readOnly={graphLocked}
+          layout={layout}
+        />
+      )}
     </div>
   );
 }

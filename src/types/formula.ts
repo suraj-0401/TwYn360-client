@@ -1,13 +1,23 @@
+export type ExtractedDependenciesDto = {
+  variables: string[];
+  functions: string[];
+  operators: string[];
+};
+
 export type FormulaDto = {
   id: string;
-  targetInstanceId: string;
+  targetType: string;
+  targetId: string;
+  formulaKind: string;
+  targetInstanceId: string | null;
   modelId: string;
   formulaType: string;
-  framework: string;
+  framework: string | null;
   frameworkVersion: string | null;
   status: string;
   rawExpression: string;
   aliasMap: Record<string, string> | null;
+  extractedDependencies: ExtractedDependenciesDto | null;
   dependencyHash: string | null;
   compiledAt: string | null;
   validationErrors: unknown;
@@ -43,4 +53,44 @@ export type FormulaVersionDto = {
   createdBy: string | null;
   createdAt: string;
   reviewDecision: FormulaReviewDecisionDto | null;
+};
+
+export type OutcomeDefinitionDto = {
+  id: string;
+  modelId: string;
+  slug: string;
+  displayName: string;
+  description: string | null;
+  unitCode: string | null;
+  statusCode: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string | null;
+  updatedBy: string | null;
+};
+
+export type DerivedFactorDefinitionDto = {
+  id: string;
+  modelId: string;
+  slug: string;
+  displayName: string;
+  description: string | null;
+  unitCode: string | null;
+  statusCode: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string | null;
+  updatedBy: string | null;
+};
+
+export type FormulaTargetType = "outcome" | "derived_factor" | "factor_instance";
+
+export type FormulaTargetSelection = {
+  targetType: FormulaTargetType;
+  targetId: string;
+  label: string;
+  slug: string;
+  formulaKind: string;
 };

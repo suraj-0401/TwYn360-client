@@ -15,10 +15,12 @@ import {
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import katex from "katex";
+import { cn } from "@/lib/utils";
 import type { Monaco } from "@monaco-editor/react";
 import type { editor, IDisposable } from "monaco-editor";
 import {
   type SimulationKnownVariable,
+  normalizeFormulaPreview,
   parseFormulaPreview,
   type SimulationValidationError,
 } from "@/services/simulation-formula.service";
@@ -26,9 +28,9 @@ import {
 type FormulaPlaygroundSkeletonProps = {
   targetLabel: string;
   targetAlias: string;
-  framework: string;
+  framework: string | null;
   frameworkOptions?: string[];
-  onFrameworkChange?: (framework: string) => void;
+  onFrameworkChange?: (framework: string | null) => void;
   frameworkLocked?: boolean;
   initialExpression?: string;
   onSaveDraft?: (expression: string) => Promise<void>;
@@ -46,6 +48,8 @@ type FormulaPlaygroundSkeletonProps = {
     errors: SimulationValidationError[];
   }) => void;
   variablePool?: Array<{ alias: string; label: string; instanceId: string }>;
+  /** Stacked = tools above editor (slide-overs). Split = side-by-side when container is wide. */
+  layout?: "split" | "stacked";
 };
 
 type ValidateState = "idle" | "validating" | "valid" | "broken" | "offline";
@@ -59,13 +63,6 @@ type MonacoMarkerData = {
 };
 type TemplatePreset = { id: string; label: string; expression: string };
 type FormulaInputMode = "monaco" | "mathlive";
-type WorkflowDefinition = {
-  id: string;
-  label: string;
-  description: string;
-  fields: Array<{ key: string; label: string; placeholder: string }>;
-  build: (targetAlias: string, values: Record<string, string>) => string;
-};
 type MathfieldElement = HTMLElement & {
   value: string;
   getValue?: (format?: string) => string;
@@ -74,6 +71,29 @@ type MathfieldElement = HTMLElement & {
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 const FORMULA_LANGUAGE_ID = "formulaDsl";
 const MARKER_OWNER = "formula-playground";
+
+function registerFormulaMonacoLanguage(monaco: Monaco): void {
+  monaco.languages.register({ id: FORMULA_LANGUAGE_ID });
+  monaco.languages.setMonarchTokensProvider(FORMULA_LANGUAGE_ID, {
+    tokenizer: {
+      root: [
+        [/[a-zA-Z_]\w*/, "identifier"],
+        [/\d+(\.\d+)?/, "number"],
+        [/[+*/^=-]/, "operator"],
+        [/[()]/, "delimiter.parenthesis"],
+      ],
+    },
+  });
+}
+
+function extractLocalDependencies(expression: string, aliases: string[]): string[] {
+  return aliases.filter((alias) => {
+    if (!alias.trim()) {
+      return false;
+    }
+    return new RegExp(`\\b${alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(expression);
+  });
+}
 
 function severityTone(severity?: string):
   | "error"
@@ -90,6 +110,26 @@ function markerSeverity(monaco: Monaco, severity?: string): number {
   if (normalized === "warning") return monaco.MarkerSeverity.Warning;
   if (normalized === "info") return monaco.MarkerSeverity.Info;
   return monaco.MarkerSeverity.Error;
+}
+
+/** One-line summary; strips duplicate Suggestion lines already embedded in API messages. */
+function diagnosticSummary(message: string): string {
+  return message
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("Suggestion:"))
+    .join(" · ");
+}
+
+function diagnosticHint(item: SimulationValidationError): string | null {
+  const suggestion = item.suggestions?.[0]?.trim();
+  if (!suggestion) {
+    return null;
+  }
+  if (item.message.includes(suggestion) || /Suggestion:/i.test(item.message)) {
+    return null;
+  }
+  return suggestion;
 }
 
 export function FormulaPlaygroundSkeleton({
@@ -111,7 +151,10 @@ export function FormulaPlaygroundSkeleton({
   governanceReason,
   onParseUpdate,
   variablePool = [],
+  layout = "split",
 }: FormulaPlaygroundSkeletonProps) {
+  const isStacked = layout === "stacked";
+  const editorHeight = isStacked ? "280px" : "355px";
   const [activeTab, setActiveTab] = useState<"variables" | "templates" | "deps">(
     "variables",
   );
@@ -124,30 +167,11 @@ export function FormulaPlaygroundSkeleton({
   const [frameworkVersion, setFrameworkVersion] = useState("1");
   const [monacoReady, setMonacoReady] = useState(false);
   const [renderedMath, setRenderedMath] = useState("");
-  const [previewLatex, setPreviewLatex] = useState("");
-  const [previewExpression, setPreviewExpression] = useState("");
-  const [inlineRenderedToken, setInlineRenderedToken] = useState("");
   const [inputMode, setInputMode] = useState<FormulaInputMode>("monaco");
-  const [activeWorkflowId, setActiveWorkflowId] = useState<string>("emax");
-  const [workflowValues, setWorkflowValues] = useState<Record<string, string>>({
-    exposureAlias: "weight",
-    emaxAlias: "emax",
-    ec50Alias: "ec50",
-    hillAlias: "hill",
-    midpointAlias: "50",
-    slopeAlias: "1",
-    lowerAlias: "0",
-    upperAlias: "1",
-    markerAlias: "weight",
-    thresholdAlias: "70",
-    belowAlias: "0",
-    aboveAlias: "1",
-  });
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
   const completionRef = useRef<IDisposable | null>(null);
   const hoverProviderRef = useRef<IDisposable | null>(null);
-  const cursorListenerRef = useRef<IDisposable | null>(null);
   const mathfieldRef = useRef<MathfieldElement | null>(null);
 
   useEffect(() => {
@@ -192,67 +216,14 @@ export function FormulaPlaygroundSkeleton({
     }),
     [targetAlias],
   );
-  const templateOptions = templatesByFramework[framework] ?? templatesByFramework.additive;
+  const genericTemplates: TemplatePreset[] = [
+    { id: "generic-ratio", label: "Ratio (BMI-style)", expression: `${targetAlias} = weight / (height ^ 2)` },
+    { id: "generic-linear", label: "Linear combination", expression: `${targetAlias} = weight + age` },
+  ];
+  const templateOptions = framework
+    ? (templatesByFramework[framework] ?? genericTemplates)
+    : genericTemplates;
   const operatorTokens = ["+", "-", "*", "/", "^", "(", ")", "sqrt()", "log()", "exp()", "abs()"];
-  const advancedWorkflows = useMemo<WorkflowDefinition[]>(
-    () => [
-      {
-        id: "emax",
-        label: "Emax model",
-        description: "Saturating exposure-response with EC50 control.",
-        fields: [
-          { key: "exposureAlias", label: "Exposure alias", placeholder: "weight" },
-          { key: "emaxAlias", label: "Emax alias/value", placeholder: "emax" },
-          { key: "ec50Alias", label: "EC50 alias/value", placeholder: "ec50" },
-        ],
-        build: (target, values) =>
-          `${target} = (${values.emaxAlias || "emax"} * ${values.exposureAlias || "weight"}) / (${values.ec50Alias || "ec50"} + ${values.exposureAlias || "weight"})`,
-      },
-      {
-        id: "hill",
-        label: "Hill response",
-        description: "Sigmoid response with explicit Hill coefficient.",
-        fields: [
-          { key: "exposureAlias", label: "Exposure alias", placeholder: "weight" },
-          { key: "emaxAlias", label: "Emax alias/value", placeholder: "emax" },
-          { key: "ec50Alias", label: "EC50 alias/value", placeholder: "ec50" },
-          { key: "hillAlias", label: "Hill alias/value", placeholder: "hill" },
-        ],
-        build: (target, values) => {
-          const exposure = values.exposureAlias || "weight";
-          const hill = values.hillAlias || "hill";
-          return `${target} = (${values.emaxAlias || "emax"} * (${exposure} ^ ${hill})) / ((${values.ec50Alias || "ec50"} ^ ${hill}) + (${exposure} ^ ${hill}))`;
-        },
-      },
-      {
-        id: "logistic",
-        label: "Logistic risk",
-        description: "Risk score mapped to 0-1 logistic space.",
-        fields: [
-          { key: "midpointAlias", label: "Midpoint", placeholder: "50" },
-          { key: "slopeAlias", label: "Slope", placeholder: "1" },
-          { key: "exposureAlias", label: "Signal alias", placeholder: "weight" },
-        ],
-        build: (target, values) =>
-          `${target} = 1 / (1 + exp(-(${values.slopeAlias || "1"} * ((${values.exposureAlias || "weight"}) - (${values.midpointAlias || "50"})))))`,
-      },
-      {
-        id: "threshold",
-        label: "Piecewise threshold",
-        description: "Binary switch above a threshold using Heaviside approximation.",
-        fields: [
-          { key: "markerAlias", label: "Marker alias", placeholder: "weight" },
-          { key: "thresholdAlias", label: "Threshold", placeholder: "70" },
-          { key: "belowAlias", label: "Below value", placeholder: "0" },
-          { key: "aboveAlias", label: "Above value", placeholder: "1" },
-        ],
-        build: (target, values) =>
-          `${target} = (${values.belowAlias || "0"}) + ((${values.aboveAlias || "1"}) - (${values.belowAlias || "0"})) * (1 / (1 + exp(-100 * ((${values.markerAlias || "weight"}) - (${values.thresholdAlias || "70"})))))`,
-      },
-    ],
-    [],
-  );
-  const activeWorkflow = advancedWorkflows.find((item) => item.id === activeWorkflowId) ?? advancedWorkflows[0];
 
   function applyEditorValue(nextValue: string) {
     setExpression(nextValue);
@@ -311,12 +282,6 @@ export function FormulaPlaygroundSkeleton({
     setExpression(model.getValue());
   }
 
-  function applyWorkflow() {
-    if (!activeWorkflow) return;
-    const workflowExpression = activeWorkflow.build(targetAlias, workflowValues);
-    applyEditorValue(workflowExpression);
-  }
-
   const tabs = [
     { key: "variables" as const, label: "Variables", icon: Link2 },
     { key: "templates" as const, label: "Templates", icon: Sparkles },
@@ -326,10 +291,8 @@ export function FormulaPlaygroundSkeleton({
   useEffect(() => {
     try {
       const candidate = expression.split("=").slice(1).join("=").trim() || expression.trim();
-      setPreviewExpression(candidate);
       if (!candidate) {
         setRenderedMath("");
-        setPreviewLatex("");
         return;
       }
       const html = katex.renderToString(candidate, {
@@ -338,16 +301,10 @@ export function FormulaPlaygroundSkeleton({
         strict: "ignore",
       });
       setRenderedMath(html);
-      if (inputMode === "mathlive" && mathfieldRef.current?.getValue) {
-        setPreviewLatex(mathfieldRef.current.getValue("latex"));
-      } else {
-        setPreviewLatex(candidate);
-      }
     } catch {
       setRenderedMath("");
-      setPreviewLatex("");
     }
-  }, [expression, inputMode]);
+  }, [expression]);
 
   useEffect(() => {
     const monaco = monacoRef.current;
@@ -422,7 +379,7 @@ export function FormulaPlaygroundSkeleton({
             ...(templateItem
               ? [
                   {
-                    label: `${framework}-template`,
+                    label: `${framework ?? "generic"}-template`,
                     kind: monaco.languages.CompletionItemKind.Snippet,
                     insertText: templateItem.expression,
                     range,
@@ -448,7 +405,6 @@ export function FormulaPlaygroundSkeleton({
     if (!monaco || !monacoReady || !model) return;
 
     hoverProviderRef.current?.dispose();
-    cursorListenerRef.current?.dispose();
 
     hoverProviderRef.current = monaco.languages.registerHoverProvider(
       FORMULA_LANGUAGE_ID,
@@ -483,22 +439,9 @@ export function FormulaPlaygroundSkeleton({
       },
     );
 
-    if (!editorInstance) return;
-
-    cursorListenerRef.current = editorInstance.onDidChangeCursorPosition((event) => {
-      const word = model.getWordAtPosition(event.position);
-      if (!word?.word) {
-        setInlineRenderedToken("");
-        return;
-      }
-      setInlineRenderedToken(word.word);
-    });
-
     return () => {
       hoverProviderRef.current?.dispose();
       hoverProviderRef.current = null;
-      cursorListenerRef.current?.dispose();
-      cursorListenerRef.current = null;
     };
   }, [monacoReady]);
 
@@ -509,23 +452,50 @@ export function FormulaPlaygroundSkeleton({
     }
 
     const timer = setTimeout(async () => {
+      const knownAliases = variables.map((item) => item.alias);
+      const knownVariables: SimulationKnownVariable[] = variables.map((item) => ({
+        alias: item.alias,
+        instanceId: item.instanceId,
+      }));
+
       setValidateState("validating");
       try {
-        const knownVariables: SimulationKnownVariable[] = variables.map((item) => ({
-          alias: item.alias,
-          instanceId: item.instanceId,
-        }));
-        const result = await parseFormulaPreview({
-          framework,
-          frameworkVersion,
+        const normalized = await normalizeFormulaPreview({
           expression: current,
-          knownVariables,
+          knownAliases,
+          editorMode: inputMode,
         });
 
-        setFrameworkVersion(result.frameworkVersion ?? frameworkVersion);
-        const nextDiagnostics = result.errors ?? [];
+        let nextDiagnostics = normalized.diagnostics ?? [];
+        let deps =
+          normalized.parseMetadata.variables.length > 0
+            ? normalized.parseMetadata.variables
+            : extractLocalDependencies(current, knownAliases);
+
+        const hasNormalizeError = nextDiagnostics.some(
+          (item) => severityTone(item.severity) === "error",
+        );
+
+        if (!hasNormalizeError) {
+          const parseResult = await parseFormulaPreview({
+            framework: framework ?? undefined,
+            frameworkVersion: framework ? frameworkVersion : undefined,
+            expression: current,
+            knownVariables,
+          });
+
+          if (parseResult.frameworkVersion && framework) {
+            setFrameworkVersion(parseResult.frameworkVersion);
+          }
+
+          nextDiagnostics = [...nextDiagnostics, ...(parseResult.errors ?? [])];
+          if ((parseResult.dependencies ?? []).length > 0) {
+            deps = (parseResult.dependencies ?? []).map((dep) => dep.alias);
+          }
+        }
+
         setDiagnostics(nextDiagnostics);
-        setDependencies((result.dependencies ?? []).map((dep) => dep.alias));
+        setDependencies(deps);
 
         const hasError = nextDiagnostics.some(
           (item) => severityTone(item.severity) === "error",
@@ -534,7 +504,7 @@ export function FormulaPlaygroundSkeleton({
         setValidateState(nextState);
         onParseUpdate?.({
           status: nextState,
-          dependencies: (result.dependencies ?? []).map((dep) => dep.alias),
+          dependencies: deps,
           errors: nextDiagnostics,
         });
       } catch {
@@ -557,7 +527,7 @@ export function FormulaPlaygroundSkeleton({
     }, 450);
 
     return () => clearTimeout(timer);
-  }, [expression, framework, frameworkVersion, onParseUpdate, variables]);
+  }, [expression, framework, frameworkVersion, inputMode, onParseUpdate, variables]);
 
   const statusLabel =
     validateState === "validating"
@@ -570,366 +540,346 @@ export function FormulaPlaygroundSkeleton({
             ? "Offline"
             : "Not validated";
 
+  const toolsTabBar = (
+    <div
+      className={cn(
+        "flex shrink-0 items-stretch border-white/[0.08]",
+        isStacked ? "border-b" : "border-b",
+      )}
+    >
+      {tabs.map(({ key, label, icon: Icon }) => {
+        const active = key === activeTab;
+        return (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setActiveTab(key)}
+            className={cn(
+              "inline-flex flex-1 items-center justify-center gap-1.5 border-b px-2 py-2.5 text-xs sm:flex-none sm:justify-start sm:px-3",
+              active
+                ? "border-[#f4f4f5] text-[#f4f4f5]"
+                : "border-transparent text-[#71717a] hover:text-[#d4d4d8]",
+            )}
+          >
+            <Icon className="size-3.5 shrink-0" />
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  const toolsPanelBody = (
+    <div
+      className={cn(
+        "space-y-2 overflow-y-auto p-3",
+        isStacked ? "max-h-[min(180px,28vh)]" : "min-h-0 flex-1",
+      )}
+    >
+      {activeTab === "variables" ? (
+        <>
+          {variables.map((variable) => (
+            <button
+              key={variable.alias}
+              type="button"
+              onClick={() => insertToken(variable.alias)}
+              className="flex w-full items-center justify-between rounded-md border border-white/[0.08] bg-white/[0.02] px-2 py-1.5 text-left text-xs text-[#e4e4e7] hover:bg-white/[0.06]"
+            >
+              <div className="min-w-0">
+                <p className="truncate">{variable.alias}</p>
+                <p className="truncate text-[10px] text-[#71717a]">{variable.label}</p>
+              </div>
+              <span className="shrink-0 text-[10px] text-[#71717a]">Insert</span>
+            </button>
+          ))}
+        </>
+      ) : null}
+
+      {activeTab === "templates" ? (
+        <>
+          {templateOptions.map((template) => (
+            <button
+              key={template.id}
+              type="button"
+              onClick={() => applyEditorValue(template.expression)}
+              className="w-full rounded-md border border-white/[0.08] bg-white/[0.02] px-2 py-1.5 text-left text-xs text-[#e4e4e7] hover:bg-white/[0.06]"
+            >
+              <p>{template.label}</p>
+              <p className="mt-1 text-[10px] text-zinc-400">{template.expression}</p>
+            </button>
+          ))}
+        </>
+      ) : null}
+
+      {activeTab === "deps" ? (
+        <div className="space-y-2">
+          {dependencies.length === 0 ? (
+            <p className="rounded-md border border-white/[0.08] bg-white/[0.02] px-2 py-1.5 text-xs text-[#71717a]">
+              No dependencies detected yet.
+            </p>
+          ) : (
+            dependencies.map((dep) => (
+              <div
+                key={dep}
+                className="rounded-md border border-white/[0.08] bg-white/[0.02] px-2 py-1.5 text-xs text-[#e4e4e7]"
+              >
+                {dep}
+              </div>
+            ))
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+
+  const toolsAside = (
+    <aside
+      className={cn(
+        "flex min-w-0 flex-col",
+        isStacked ? "border-b border-white/[0.08] bg-[#0f0f11]" : "min-h-0",
+      )}
+    >
+      {toolsTabBar}
+      {toolsPanelBody}
+    </aside>
+  );
+
+  const operatorToolbar = (
+    <div className="mb-3 overflow-x-auto pb-0.5">
+      <div className="flex w-max min-w-full flex-nowrap gap-1.5">
+        {operatorTokens.map((token) => (
+          <button
+            key={token}
+            type="button"
+            onClick={() => insertToken(token)}
+            className="shrink-0 rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-[11px] text-zinc-300 hover:bg-white/[0.08]"
+          >
+            {token}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  const editorSurface =
+    inputMode === "monaco" ? (
+      <div
+        className="overflow-hidden rounded-md border border-white/[0.08] bg-[#0b0b0d]"
+        style={{ height: editorHeight }}
+      >
+        <MonacoEditor
+          height={editorHeight}
+          language={FORMULA_LANGUAGE_ID}
+          theme="vs-dark"
+          value={expression}
+          beforeMount={registerFormulaMonacoLanguage}
+          onMount={(editorInstance, monaco) => {
+            editorRef.current = editorInstance;
+            monacoRef.current = monaco;
+            setMonacoReady(true);
+          }}
+          onChange={(value) => applyEditorValue(value ?? "")}
+          options={{
+            minimap: { enabled: false },
+            wordWrap: "on",
+            lineNumbers: "on",
+            fontSize: 13,
+            automaticLayout: true,
+            suggestOnTriggerCharacters: true,
+          }}
+        />
+      </div>
+    ) : (
+      <div
+        className="overflow-auto rounded-md border border-white/[0.08] bg-[#0b0b0d] p-3"
+        style={{ height: editorHeight }}
+      >
+        <math-field
+          ref={(node) => {
+            mathfieldRef.current = node as MathfieldElement | null;
+          }}
+          className="block min-h-[240px] w-full rounded border border-white/10 bg-[#0f0f12] p-3 text-base text-zinc-100"
+        />
+      </div>
+    );
+
+  const editorPanel = (
+    <div
+      className={cn(
+        "min-w-0 p-3",
+        !isStacked && "border-r border-white/[0.08]",
+      )}
+    >
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-[#71717a]">
+            Expression
+          </p>
+          <p className="mt-0.5 text-[11px] text-[#52525b]">{framework ?? "generic"}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setInputMode("monaco")}
+            className={cn(
+              "rounded border px-2 py-1 text-[11px]",
+              inputMode === "monaco"
+                ? "border-cyan-400/60 bg-cyan-500/10 text-cyan-200"
+                : "border-white/10 bg-white/[0.03] text-zinc-300",
+            )}
+          >
+            Monaco
+          </button>
+          <button
+            type="button"
+            onClick={() => setInputMode("mathlive")}
+            className={cn(
+              "rounded border px-2 py-1 text-[11px]",
+              inputMode === "mathlive"
+                ? "border-cyan-400/60 bg-cyan-500/10 text-cyan-200"
+                : "border-white/10 bg-white/[0.03] text-zinc-300",
+            )}
+          >
+            MathLive
+          </button>
+        </div>
+      </div>
+
+      {operatorToolbar}
+      {editorSurface}
+
+      {renderedMath ? (
+        <div className="mt-3 rounded-md border border-white/10 bg-[#0f0f12] p-3">
+          <p className="mb-2 text-[11px] uppercase tracking-wide text-zinc-400">Preview</p>
+          <div
+            className="overflow-x-auto text-zinc-100"
+            dangerouslySetInnerHTML={{ __html: renderedMath }}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+
   return (
-    <section className="overflow-hidden rounded-xl border border-white/[0.08] bg-[#121214]">
+    <section className="@container overflow-hidden rounded-xl border border-white/[0.08] bg-[#121214]">
       <div className="border-b border-white/[0.08] px-4 py-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
+        <div
+          className={cn(
+            "flex flex-col gap-3",
+            !isStacked && "lg:flex-row lg:flex-wrap lg:items-start lg:justify-between",
+          )}
+        >
+          <div className="min-w-0 flex-1">
             <p className="truncate text-base font-semibold text-[#f4f4f5]">
               {targetLabel} - Formula Editor
             </p>
             <p className="mt-1 text-xs text-[#a1a1aa]">
-              {framework} framework - draft v{governanceVersion ?? 1}
+              {framework
+                ? `${framework} framework strategy`
+                : "Generic expression (no framework strategy)"}{" "}
+              - draft v{governanceVersion ?? 1}
             </p>
           </div>
-          <div className="min-w-[180px]">
-            <label className="mb-1 block text-[10px] uppercase tracking-wide text-zinc-400">
-              Framework
-            </label>
-            <select
-              value={framework}
-              onChange={(event) => onFrameworkChange?.(event.target.value)}
-              className="w-full rounded border border-white/10 bg-[#121216] px-2 py-1 text-xs text-zinc-100"
-              disabled={!onFrameworkChange || frameworkLocked}
-            >
-              {(frameworkOptions.length ? frameworkOptions : [framework]).map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center rounded-md border border-amber-400/25 bg-amber-400/10 px-2 py-1 text-[11px] font-medium text-amber-200">
-              {statusLabel}
-            </span>
-            <button
-              type="button"
-              onClick={() => {
-                if (onSaveDraft) {
-                  void onSaveDraft(expression.trim()).catch(() => undefined);
-                }
-              }}
-              disabled={isSavingDraft}
-              className="inline-flex items-center gap-1 rounded-md border border-white/[0.12] bg-white/[0.02] px-3 py-1.5 text-xs font-medium text-[#e4e4e7] hover:bg-white/[0.06]"
-            >
-              {isSavingDraft ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
-              {isSavingDraft ? "Saving..." : "Save draft"}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (onSubmitForReview) {
-                  void onSubmitForReview().catch(() => undefined);
-                }
-              }}
-              disabled={isSubmittingReview || !canSubmitForReview}
-              className="inline-flex items-center gap-1 rounded-md border border-white/[0.08] bg-white/[0.02] px-3 py-1.5 text-xs font-medium text-[#71717a] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isSubmittingReview ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
-              {isSubmittingReview ? "Submitting..." : "Submit for review"}
-            </button>
-          </div>
-        </div>
-      </div>
 
-      <div className="grid border-b border-white/[0.08] text-xs lg:grid-cols-4">
-        {[
-          ["1", "Formula type", framework],
-          ["2", "Write expression", "In progress"],
-          ["3", "Validation", validateState === "validating" ? "Running" : "Ready"],
-          ["4", "Review & submit", validateState === "broken" ? "Locked" : "Ready"],
-        ].map(([index, label, sub]) => (
           <div
-            key={label}
-            className="flex items-center gap-2 border-r border-white/[0.06] px-3 py-2 last:border-r-0"
-          >
-            <span className="inline-flex size-5 items-center justify-center rounded-full border border-white/[0.16] text-[11px] text-[#d4d4d8]">
-              {index}
-            </span>
-            <div className="min-w-0">
-              <p className="truncate text-[#e4e4e7]">{label}</p>
-              <p className="truncate text-[11px] text-[#71717a]">{sub}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="grid min-h-[420px] lg:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="border-r border-white/[0.08] p-3">
-          <div className="flex items-center justify-between pb-2">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-[#71717a]">
-              Expression
-            </p>
-            <span className="text-[11px] text-[#71717a]">{framework}</span>
-          </div>
-          <div className="mb-2 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setInputMode("monaco")}
-              className={`rounded border px-2 py-1 text-[11px] ${inputMode === "monaco" ? "border-cyan-400/60 bg-cyan-500/10 text-cyan-200" : "border-white/10 bg-white/[0.03] text-zinc-300"}`}
-            >
-              Monaco
-            </button>
-            <button
-              type="button"
-              onClick={() => setInputMode("mathlive")}
-              className={`rounded border px-2 py-1 text-[11px] ${inputMode === "mathlive" ? "border-cyan-400/60 bg-cyan-500/10 text-cyan-200" : "border-white/10 bg-white/[0.03] text-zinc-300"}`}
-            >
-              MathLive
-            </button>
-          </div>
-          <div className="mb-2 flex flex-wrap gap-1.5">
-            {operatorTokens.map((token) => (
-              <button
-                key={token}
-                type="button"
-                onClick={() => insertToken(token)}
-                className="rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-[11px] text-zinc-300 hover:bg-white/[0.08]"
-              >
-                {token}
-              </button>
-            ))}
-          </div>
-          {inputMode === "monaco" ? (
-            <div className="h-[355px] overflow-hidden rounded-md border border-white/[0.08] bg-[#0b0b0d]">
-              <MonacoEditor
-                height="355px"
-                language={FORMULA_LANGUAGE_ID}
-                theme="vs-dark"
-                value={expression}
-                beforeMount={(monaco) => {
-                  monaco.languages.register({ id: FORMULA_LANGUAGE_ID });
-                  monaco.languages.setMonarchTokensProvider(FORMULA_LANGUAGE_ID, {
-                    tokenizer: {
-                      root: [
-                        [/[a-zA-Z_][\\w]*/, "identifier"],
-                        [/\\d+(\\.\\d+)?/, "number"],
-                        [/[+*/^=-]/, "operator"],
-                        [/[()]/, "delimiter.parenthesis"],
-                      ],
-                    },
-                  });
-                }}
-                onMount={(editorInstance, monaco) => {
-                  editorRef.current = editorInstance;
-                  monacoRef.current = monaco;
-                  setMonacoReady(true);
-                }}
-                onChange={(value) => applyEditorValue(value ?? "")}
-                options={{
-                  minimap: { enabled: false },
-                  wordWrap: "on",
-                  lineNumbers: "on",
-                  fontSize: 13,
-                  automaticLayout: true,
-                  suggestOnTriggerCharacters: true,
-                }}
-              />
-            </div>
-          ) : (
-            <div className="h-[355px] overflow-auto rounded-md border border-white/[0.08] bg-[#0b0b0d] p-3">
-              <math-field
-                ref={(node) => {
-                  mathfieldRef.current = node as MathfieldElement | null;
-                }}
-                className="block min-h-[320px] w-full rounded border border-white/10 bg-[#0f0f12] p-3 text-base text-zinc-100"
-              />
-            </div>
-          )}
-          <div className="mt-3 rounded-md border border-white/10 bg-[#0f0f12] p-2">
-            <p className="mb-1 text-[11px] uppercase tracking-wide text-zinc-400">
-              Shared preview ({inputMode === "monaco" ? "Monaco" : "MathLive"})
-            </p>
-            {renderedMath ? (
-              <div
-                className="overflow-x-auto text-zinc-100"
-                // eslint-disable-next-line react/no-danger
-                dangerouslySetInnerHTML={{ __html: renderedMath }}
-              />
-            ) : (
-              <p className="text-xs text-zinc-400">Preview unavailable for current expression.</p>
+            className={cn(
+              "flex flex-col gap-3",
+              isStacked ? "w-full" : "w-full sm:w-auto sm:min-w-[200px] lg:max-w-[220px]",
             )}
-            <div className="mt-2 grid gap-2 md:grid-cols-2">
-              <div className="rounded border border-white/10 bg-[#111114] p-2">
-                <p className="text-[10px] uppercase tracking-wide text-zinc-500">Expression</p>
-                <p className="mt-1 break-all font-mono text-[11px] text-zinc-300">
-                  {previewExpression || "-"}
-                </p>
-              </div>
-              <div className="rounded border border-white/10 bg-[#111114] p-2">
-                <p className="text-[10px] uppercase tracking-wide text-zinc-500">LaTeX</p>
-                <p className="mt-1 break-all font-mono text-[11px] text-zinc-300">
-                  {previewLatex || "-"}
-                </p>
-              </div>
-            </div>
-            {inputMode === "monaco" ? (
-              <div className="mt-2 rounded border border-white/10 bg-[#111114] p-2">
-                <p className="text-[10px] uppercase tracking-wide text-zinc-500">
-                  Inline symbolic token preview
-                </p>
-                {inlineRenderedToken ? (
-                  <div className="mt-1 flex items-center justify-between gap-3">
-                    <p className="font-mono text-[11px] text-zinc-300">{inlineRenderedToken}</p>
-                    <span
-                      className="text-zinc-100"
-                      // eslint-disable-next-line react/no-danger
-                      dangerouslySetInnerHTML={{
-                        __html: katex.renderToString(inlineRenderedToken, {
-                          throwOnError: false,
-                          strict: "ignore",
-                        }),
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <p className="mt-1 text-[11px] text-zinc-400">
-                    Move cursor over a token in Monaco to preview symbol rendering.
-                  </p>
-                )}
-              </div>
-            ) : null}
-          </div>
-          <div className="mt-3 rounded-md border border-white/10 bg-[#0f0f12] p-2">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-[11px] uppercase tracking-wide text-zinc-400">
-                Advanced scientific workflows
-              </p>
-              <button
-                type="button"
-                onClick={applyWorkflow}
-                className="rounded border border-cyan-500/40 bg-cyan-500/10 px-2 py-1 text-[11px] text-cyan-200 hover:bg-cyan-500/20"
-              >
-                Apply workflow
-              </button>
-            </div>
-            <p className="mt-1 text-[11px] text-zinc-500">
-              Guided builders for scientific equation patterns.
-            </p>
-            <div className="mt-2">
+          >
+            <div>
+              <label className="mb-1 block text-[10px] uppercase tracking-wide text-zinc-400">
+                Framework strategy
+              </label>
               <select
-                value={activeWorkflowId}
-                onChange={(event) => setActiveWorkflowId(event.target.value)}
-                className="w-full rounded border border-white/10 bg-[#121216] px-2 py-1 text-xs text-zinc-100"
+                value={framework ?? ""}
+                onChange={(event) =>
+                  onFrameworkChange?.(event.target.value.length > 0 ? event.target.value : null)
+                }
+                className="w-full rounded border border-white/10 bg-[#121216] px-2 py-1.5 text-xs text-zinc-100"
+                disabled={!onFrameworkChange || frameworkLocked}
               >
-                {advancedWorkflows.map((workflow) => (
-                  <option key={workflow.id} value={workflow.id}>
-                    {workflow.label}
-                  </option>
-                ))}
+                <option value="">None (generic expression)</option>
+                {(frameworkOptions.length ? frameworkOptions : framework ? [framework] : []).map(
+                  (item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ),
+                )}
               </select>
             </div>
-            {activeWorkflow ? (
-              <div className="mt-2 space-y-2">
-                <p className="text-[11px] text-zinc-400">{activeWorkflow.description}</p>
-                <div className="grid gap-2 md:grid-cols-2">
-                  {activeWorkflow.fields.map((field) => (
-                    <label key={field.key} className="space-y-1">
-                      <span className="block text-[10px] uppercase tracking-wide text-zinc-500">
-                        {field.label}
-                      </span>
-                      <input
-                        value={workflowValues[field.key] ?? ""}
-                        onChange={(event) =>
-                          setWorkflowValues((previous) => ({
-                            ...previous,
-                            [field.key]: event.target.value,
-                          }))
-                        }
-                        placeholder={field.placeholder}
-                        className="w-full rounded border border-white/10 bg-[#121216] px-2 py-1.5 text-xs text-zinc-100 outline-none ring-cyan-400/50 focus:ring-1"
-                      />
-                    </label>
-                  ))}
-                </div>
-              </div>
-            ) : null}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center rounded-md border border-amber-400/25 bg-amber-400/10 px-2 py-1 text-[11px] font-medium text-amber-200">
+                {statusLabel}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onSaveDraft) {
+                    void onSaveDraft(expression.trim()).catch(() => undefined);
+                  }
+                }}
+                disabled={isSavingDraft}
+                className="inline-flex items-center gap-1 rounded-md border border-white/[0.12] bg-white/[0.02] px-3 py-1.5 text-xs font-medium text-[#e4e4e7] hover:bg-white/[0.06]"
+              >
+                {isSavingDraft ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Save className="size-3.5" />
+                )}
+                {isSavingDraft ? "Saving..." : "Save draft"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onSubmitForReview) {
+                    void onSubmitForReview().catch(() => undefined);
+                  }
+                }}
+                disabled={isSubmittingReview || !canSubmitForReview}
+                className="inline-flex items-center gap-1 rounded-md border border-white/[0.08] bg-white/[0.02] px-3 py-1.5 text-xs font-medium text-[#71717a] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSubmittingReview ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Send className="size-3.5" />
+                )}
+                {isSubmittingReview ? "Submitting..." : "Submit for review"}
+              </button>
+            </div>
           </div>
         </div>
-
-        <aside className="flex flex-col">
-          <div className="flex items-center border-b border-white/[0.08]">
-            {tabs.map(({ key, label, icon: Icon }) => {
-              const active = key === activeTab;
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setActiveTab(key)}
-                  className={[
-                    "inline-flex items-center gap-1.5 border-b px-3 py-2 text-xs",
-                    active
-                      ? "border-[#f4f4f5] text-[#f4f4f5]"
-                      : "border-transparent text-[#71717a] hover:text-[#d4d4d8]",
-                  ].join(" ")}
-                >
-                  <Icon className="size-3.5" />
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="flex-1 space-y-2 p-3">
-            {activeTab === "variables" ? (
-              <>
-                {variables.map((variable) => (
-                  <button
-                    key={variable.alias}
-                    type="button"
-                    onClick={() => insertToken(variable.alias)}
-                    className="flex w-full items-center justify-between rounded-md border border-white/[0.08] bg-white/[0.02] px-2 py-1.5 text-left text-xs text-[#e4e4e7] hover:bg-white/[0.06]"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate">{variable.alias}</p>
-                      <p className="truncate text-[10px] text-[#71717a]">{variable.label}</p>
-                    </div>
-                    <span className="text-[10px] text-[#71717a]">Insert</span>
-                  </button>
-                ))}
-              </>
-            ) : null}
-
-            {activeTab === "templates" ? (
-              <>
-                {templateOptions.map((template) => (
-                  <button
-                    key={template.id}
-                    type="button"
-                    onClick={() => applyEditorValue(template.expression)}
-                    className="w-full rounded-md border border-white/[0.08] bg-white/[0.02] px-2 py-1.5 text-left text-xs text-[#e4e4e7] hover:bg-white/[0.06]"
-                  >
-                    <p>{template.label}</p>
-                    <p className="mt-1 text-[10px] text-zinc-400">{template.expression}</p>
-                  </button>
-                ))}
-              </>
-            ) : null}
-
-            {activeTab === "deps" ? (
-              <div className="space-y-2">
-                {dependencies.length === 0 ? (
-                  <p className="rounded-md border border-white/[0.08] bg-white/[0.02] px-2 py-1.5 text-xs text-[#71717a]">
-                    No dependencies detected yet.
-                  </p>
-                ) : (
-                  dependencies.map((dep) => (
-                    <div
-                      key={dep}
-                      className="rounded-md border border-white/[0.08] bg-white/[0.02] px-2 py-1.5 text-xs text-[#e4e4e7]"
-                    >
-                      {dep}
-                    </div>
-                  ))
-                )}
-              </div>
-            ) : null}
-          </div>
-        </aside>
       </div>
 
-      <div className="grid gap-3 border-t border-white/[0.08] bg-[#0f0f12] p-3 text-xs md:grid-cols-4">
+      <div
+        className={cn(
+          "grid min-w-0",
+          isStacked
+            ? "grid-cols-1"
+            : "min-h-[420px] grid-cols-1 @min-[900px]:grid-cols-[minmax(0,1fr)_280px]",
+        )}
+      >
+        {isStacked ? (
+          <>
+            {toolsAside}
+            {editorPanel}
+          </>
+        ) : (
+          <>
+            {editorPanel}
+            {toolsAside}
+          </>
+        )}
+      </div>
+
+      <div
+        className={cn(
+          "grid gap-3 border-t border-white/[0.08] bg-[#0f0f12] p-3 text-xs",
+          isStacked ? "grid-cols-1 sm:grid-cols-3" : "md:grid-cols-3",
+        )}
+      >
         <div>
           <p className="text-[11px] uppercase tracking-wide text-[#71717a]">Target</p>
           <p className="mt-1 text-[#e4e4e7]">{targetLabel}</p>
@@ -943,31 +893,21 @@ export function FormulaPlaygroundSkeleton({
           {governanceReason ? (
             <p className="mt-1 line-clamp-2 text-[11px] text-zinc-400">{governanceReason}</p>
           ) : null}
-        </div>
-        <div>
-          <p className="text-[11px] uppercase tracking-wide text-[#71717a]">Dependencies</p>
-          <p className="mt-1 text-[#e4e4e7]">{dependencies.join(", ") || "-"}</p>
-        </div>
-        <div>
-          <p className="text-[11px] uppercase tracking-wide text-[#71717a]">
-            Normalized Expression
-          </p>
-          <p className="mt-1 truncate text-[#e4e4e7]">{expression}</p>
           {governanceUpdatedAt ? (
-            <p className="mt-1 text-[11px] text-zinc-400">
+            <p className="mt-1 text-[11px] text-zinc-500">
               Updated {new Date(governanceUpdatedAt).toLocaleString()}
             </p>
           ) : null}
         </div>
+        <div>
+          <p className="text-[11px] uppercase tracking-wide text-[#71717a]">Dependencies</p>
+          <p className="mt-1 text-[#e4e4e7]">{dependencies.join(", ") || "—"}</p>
+        </div>
       </div>
 
-      <div className="grid gap-2 border-t border-white/[0.08] bg-[#111114] p-3 text-xs md:grid-cols-3">
-        {diagnostics.length === 0 ? (
-          <div className="md:col-span-3 rounded-md border border-emerald-500/20 bg-emerald-500/10 p-2 text-emerald-200/90">
-            No validation issues.
-          </div>
-        ) : (
-          diagnostics.map((item, index) => {
+      {diagnostics.length > 0 ? (
+        <div className="space-y-2 border-t border-white/[0.08] bg-[#111114] p-3 text-xs">
+          {diagnostics.map((item, index) => {
             const tone = severityTone(item.severity);
             const styles =
               tone === "error"
@@ -977,21 +917,23 @@ export function FormulaPlaygroundSkeleton({
                   : "border-sky-500/25 bg-sky-500/10 text-sky-200/90";
 
             const Icon = tone === "error" ? CircleAlert : tone === "warning" ? Beaker : Info;
+            const hint = diagnosticHint(item);
 
             return (
-              <div key={`${item.type}-${index}`} className={`flex items-start gap-2 rounded-md border p-2 ${styles}`}>
+              <div
+                key={`${item.type}-${index}`}
+                className={`flex items-start gap-2 rounded-md border p-2 ${styles}`}
+              >
                 <Icon className="mt-0.5 size-3.5 shrink-0" />
-                <div>
-                  <p>{item.message}</p>
-                  {item.suggestions?.length ? (
-                    <p className="mt-1 text-[11px] opacity-90">Hint: {item.suggestions[0]}</p>
-                  ) : null}
+                <div className="min-w-0">
+                  <p>{diagnosticSummary(item.message)}</p>
+                  {hint ? <p className="mt-1 text-[11px] opacity-90">{hint}</p> : null}
                 </div>
               </div>
             );
-          })
-        )}
-      </div>
+          })}
+        </div>
+      ) : null}
     </section>
   );
 }

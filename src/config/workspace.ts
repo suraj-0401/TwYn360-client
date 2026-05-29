@@ -5,6 +5,8 @@ export const WORKSPACE_SLUGS = {
   CATEGORY_FORM: "category-form",
   DRUG_FORM: "drug-form",
   MODEL_FORM: "model-form",
+  DERIVED_FACTOR_FORM: "derived-factor-form",
+  OUTCOME_FORM: "outcome-form",
 } as const;
 
 export type WorkspaceSlug = (typeof WORKSPACE_SLUGS)[keyof typeof WORKSPACE_SLUGS];
