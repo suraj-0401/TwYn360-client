@@ -12,6 +12,7 @@ type RegistryListCardProps = {
   isLoading?: boolean;
   empty?: ReactNode;
   children?: ReactNode;
+  className?: string;
   pagination?: {
     meta: PaginationMeta;
     page: number;
@@ -27,24 +28,33 @@ export function RegistryListCard({
   isLoading = false,
   empty,
   children,
+  className,
   pagination,
 }: RegistryListCardProps) {
   const showEmpty = empty !== undefined && !children;
 
   return (
-    <ContentCard flush className="overflow-hidden">
-      <ListToolbar
-        total={total}
-        meta={
-          meta ??
-          (isFetching && !isLoading ? "Updating…" : undefined)
-        }
-      />
-      {showEmpty ? <div className="p-8">{empty}</div> : null}
+    <ContentCard
+      flush
+      className={cn(
+        "flex min-h-[min(320px,50vh)] flex-col overflow-hidden",
+        className,
+      )}
+    >
+      <div className="shrink-0">
+        <ListToolbar
+          total={total}
+          meta={
+            meta ??
+            (isFetching && !isLoading ? "Updating…" : undefined)
+          }
+        />
+      </div>
+      {showEmpty ? <div className="flex-1 p-8">{empty}</div> : null}
       {children ? (
         <div
           className={cn(
-            "max-h-[min(70vh,720px)] overflow-auto",
+            "min-h-0 flex-1 overflow-auto",
             isFetching && !isLoading && "opacity-60 transition-opacity",
           )}
         >
@@ -52,7 +62,7 @@ export function RegistryListCard({
         </div>
       ) : null}
       {pagination && !showEmpty ? (
-        <div className="border-t border-white/[0.06] px-4 py-3">
+        <div className="shrink-0 border-t border-white/[0.08] bg-[#0f0f11] px-4 py-3">
           <ListPagination
             variant="platform"
             pagination={pagination.meta}

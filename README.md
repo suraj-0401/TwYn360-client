@@ -110,3 +110,4 @@ Uses `EntityRecordForm` + `entity-record.service` (not generic `/entities/[typeS
 |---------|---------|
 | `entity-record.service` | Category & drug CRUD |
 | `workspace.service` | Renderer definitions + admin publish / builder |
+    

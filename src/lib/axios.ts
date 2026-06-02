@@ -1,5 +1,9 @@
 import axios, { type AxiosError } from "axios";
 import { env } from "@/config/env";
+import {
+  getPersonaRequestHeaders,
+  readStoredPersona,
+} from "@/config/persona";
 import { ApiClientError, handleGlobalApiError } from "@/lib/api-error";
 import type { ApiErrorResponse } from "@/types/api";
 
@@ -19,12 +23,20 @@ export const apiClient = axios.create({
   timeout: 30_000,
 });
 
-/** Attach builder admin key to mutating workspace/lookup requests when configured. */
+/** Attach builder admin key and Phase 0 persona headers. */
 apiClient.interceptors.request.use((config) => {
   const adminKey = env.NEXT_PUBLIC_ADMIN_API_KEY?.trim();
   if (adminKey && !config.headers["x-admin-key"]) {
     config.headers["x-admin-key"] = adminKey;
   }
+
+  const personaHeaders = getPersonaRequestHeaders(readStoredPersona());
+  for (const [key, value] of Object.entries(personaHeaders)) {
+    if (!config.headers[key]) {
+      config.headers[key] = value;
+    }
+  }
+
   return config;
 });
 

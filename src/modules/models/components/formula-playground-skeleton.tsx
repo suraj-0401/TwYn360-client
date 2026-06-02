@@ -1,39 +1,54 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Beaker,
-  CircleAlert,
-  CircleCheck,
-  FileCheck2,
-  Info,
-  Link2,
-  Loader2,
-  Save,
-  Send,
-  Sparkles,
-} from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Loader2, Play, Save, Search, Send, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import katex from "katex";
 import { cn } from "@/lib/utils";
 import type { Monaco } from "@monaco-editor/react";
 import type { editor, IDisposable } from "monaco-editor";
 import {
-  type SimulationKnownVariable,
   normalizeFormulaPreview,
   parseFormulaPreview,
   type SimulationValidationError,
 } from "@/services/simulation-formula.service";
+import {
+  toDisplayFormulaExpression,
+  toParseFormulaExpression,
+  toStoredFormulaExpression,
+} from "@/modules/models/utils/formula-expression";
+import {
+  FORMULA_DSL_FUNCTIONS,
+  FORMULA_TOOLBAR_GROUPS,
+} from "@/modules/models/constants/formula-dsl";
+import { evaluateFormulaSandbox } from "@/modules/models/utils/formula-sandbox-eval";
+import {
+  classifyFormulaDependencies,
+  parametersToSimulationPayload,
+} from "@/modules/models/utils/formula-parameters";
+import type { FormulaParameterInput } from "@/types/formula";
+import type { SimulationDependencySummary } from "@/services/simulation-formula.service";
+import type { FormulaVariablePoolItem } from "@/modules/models/utils/formula-variable-pool";
+import {
+  buildUnitByAlias,
+  formatUnitLabel,
+  formatValueWithUnit,
+  resolveParameterUnit,
+} from "@/modules/models/utils/formula-unit-display";
 
-type FormulaPlaygroundSkeletonProps = {
+type ParseMetadata = {
+  variables: string[];
+  functions: string[];
+  operators: string[];
+};
+
+export type FormulaStudioProps = {
   targetLabel: string;
   targetAlias: string;
-  framework: string | null;
-  frameworkOptions?: string[];
-  onFrameworkChange?: (framework: string | null) => void;
-  frameworkLocked?: boolean;
+  /** Outcome / derived factor output unit (e.g. kg/m² for BMI). */
+  targetUnitCode?: string | null;
   initialExpression?: string;
-  onSaveDraft?: (expression: string) => Promise<void>;
+  onSaveDraft?: (storedExpression: string) => Promise<void>;
   onSubmitForReview?: () => Promise<void>;
   isSavingDraft?: boolean;
   isSubmittingReview?: boolean;
@@ -45,11 +60,11 @@ type FormulaPlaygroundSkeletonProps = {
   onParseUpdate?: (payload: {
     status: ValidateState;
     dependencies: string[];
+    dependencySummary: SimulationDependencySummary;
     errors: SimulationValidationError[];
   }) => void;
-  variablePool?: Array<{ alias: string; label: string; instanceId: string }>;
-  /** Stacked = tools above editor (slide-overs). Split = side-by-side when container is wide. */
-  layout?: "split" | "stacked";
+  variablePool?: FormulaVariablePoolItem[];
+  formulaParameters: FormulaParameterInput[];
 };
 
 type ValidateState = "idle" | "validating" | "valid" | "broken" | "offline";
@@ -62,11 +77,6 @@ type MonacoMarkerData = {
   severity: number;
 };
 type TemplatePreset = { id: string; label: string; expression: string };
-type FormulaInputMode = "monaco" | "mathlive";
-type MathfieldElement = HTMLElement & {
-  value: string;
-  getValue?: (format?: string) => string;
-};
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 const FORMULA_LANGUAGE_ID = "formulaDsl";
@@ -112,33 +122,24 @@ function markerSeverity(monaco: Monaco, severity?: string): number {
   return monaco.MarkerSeverity.Error;
 }
 
-/** One-line summary; strips duplicate Suggestion lines already embedded in API messages. */
-function diagnosticSummary(message: string): string {
-  return message
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !line.startsWith("Suggestion:"))
-    .join(" · ");
+const PARSE_DEBOUNCE_MS = 400;
+
+function parameterDetailLine(
+  param: FormulaParameterInput,
+  unit: string | null,
+): string {
+  if (param.type === "STATIC") {
+    const value = param.defaultValue ?? "?";
+    return unit ? `constant · ${value} ${unit}` : `constant · ${value}`;
+  }
+  const source = param.sourceType === "DERIVED_FACTOR" ? "derived factor" : "factor instance";
+  return unit ? `${source} · ${unit}` : source;
 }
 
-function diagnosticHint(item: SimulationValidationError): string | null {
-  const suggestion = item.suggestions?.[0]?.trim();
-  if (!suggestion) {
-    return null;
-  }
-  if (item.message.includes(suggestion) || /Suggestion:/i.test(item.message)) {
-    return null;
-  }
-  return suggestion;
-}
-
-export function FormulaPlaygroundSkeleton({
+export function FormulaStudio({
   targetLabel,
   targetAlias,
-  framework,
-  frameworkOptions = [],
-  onFrameworkChange,
-  frameworkLocked = false,
+  targetUnitCode = null,
   initialExpression,
   onSaveDraft,
   onSubmitForReview,
@@ -151,79 +152,213 @@ export function FormulaPlaygroundSkeleton({
   governanceReason,
   onParseUpdate,
   variablePool = [],
-  layout = "split",
-}: FormulaPlaygroundSkeletonProps) {
-  const isStacked = layout === "stacked";
-  const editorHeight = isStacked ? "280px" : "355px";
-  const [activeTab, setActiveTab] = useState<"variables" | "templates" | "deps">(
-    "variables",
+  formulaParameters,
+}: FormulaStudioProps) {
+  const targetUnitLabel = formatUnitLabel(targetUnitCode);
+  const unitByAlias = useMemo(() => buildUnitByAlias(variablePool), [variablePool]);
+
+  const emptyDisplayExpression = useMemo(
+    () => toDisplayFormulaExpression(targetAlias, ""),
+    [targetAlias],
   );
   const [expression, setExpression] = useState(
-    initialExpression ?? `${targetAlias} = (weight / (height ^ 2))`,
+    initialExpression !== undefined
+      ? toDisplayFormulaExpression(targetAlias, initialExpression)
+      : emptyDisplayExpression,
   );
+  const [inputSearch, setInputSearch] = useState("");
+  const [parseMetadata, setParseMetadata] = useState<ParseMetadata | null>(null);
+  const [sandboxDraft, setSandboxDraft] = useState<Record<string, string>>({});
+  const [sandboxRun, setSandboxRun] = useState<{
+    status: "idle" | "success" | "error";
+    value?: number;
+    message?: string;
+  }>({ status: "idle" });
   const [diagnostics, setDiagnostics] = useState<SimulationValidationError[]>([]);
-  const [dependencies, setDependencies] = useState<string[]>(["weight", "height"]);
+  const [dependencies, setDependencies] = useState<string[]>([]);
+  const [dependencySummary, setDependencySummary] =
+    useState<SimulationDependencySummary | null>(null);
   const [validateState, setValidateState] = useState<ValidateState>("idle");
-  const [frameworkVersion, setFrameworkVersion] = useState("1");
   const [monacoReady, setMonacoReady] = useState(false);
-  const [renderedMath, setRenderedMath] = useState("");
-  const [inputMode, setInputMode] = useState<FormulaInputMode>("monaco");
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
   const completionRef = useRef<IDisposable | null>(null);
   const hoverProviderRef = useRef<IDisposable | null>(null);
-  const mathfieldRef = useRef<MathfieldElement | null>(null);
 
   useEffect(() => {
-    setExpression(initialExpression ?? `${targetAlias} = (weight / (height ^ 2))`);
-  }, [initialExpression, targetAlias]);
+    setExpression(
+      initialExpression !== undefined
+        ? toDisplayFormulaExpression(targetAlias, initialExpression)
+        : emptyDisplayExpression,
+    );
+  }, [emptyDisplayExpression, initialExpression, targetAlias]);
 
-  const variables = useMemo(() => {
-    if (variablePool.length > 0) return variablePool;
+  useEffect(() => {
+    const next: Record<string, string> = {};
+    for (const param of formulaParameters) {
+      if (param.type === "STATIC" && param.defaultValue !== undefined) {
+        next[param.alias] = String(param.defaultValue);
+      } else if (sandboxDraft[param.alias] !== undefined) {
+        next[param.alias] = sandboxDraft[param.alias];
+      } else {
+        next[param.alias] = "";
+      }
+    }
+    setSandboxDraft(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sync keys when parameter list changes
+  }, [formulaParameters.map((p) => p.alias).join("|")]);
+
+  const declaredAliases = useMemo(
+    () => formulaParameters.map((param) => param.alias),
+    [formulaParameters],
+  );
+
+  const parseBody = useMemo(
+    () => toParseFormulaExpression(expression, targetAlias),
+    [expression, targetAlias],
+  );
+
+  /** Parameters referenced in the current expression (sandbox only needs these). */
+  const sandboxParameters = useMemo(() => {
+    const used = new Set<string>();
+    if (dependencySummary) {
+      for (const alias of dependencySummary.usedDynamic) {
+        used.add(alias);
+      }
+      for (const alias of dependencySummary.usedStatic) {
+        used.add(alias);
+      }
+    }
+    if (parseMetadata?.variables.length) {
+      for (const alias of parseMetadata.variables) {
+        used.add(alias);
+      }
+    }
+    if (used.size === 0 && parseBody) {
+      for (const alias of extractLocalDependencies(parseBody, declaredAliases)) {
+        used.add(alias);
+      }
+    }
+    if (used.size === 0) {
+      return [];
+    }
+    return formulaParameters.filter((param) => used.has(param.alias));
+  }, [declaredAliases, dependencySummary, formulaParameters, parseBody, parseMetadata]);
+
+  function buildSandboxNumericBindings(): Record<string, number> | null {
+    const bindings: Record<string, number> = {};
+    const missing: string[] = [];
+    for (const param of sandboxParameters) {
+      const raw = sandboxDraft[param.alias]?.trim() ?? "";
+      let value = raw === "" ? NaN : Number(raw);
+      if (Number.isNaN(value) && param.type === "STATIC" && param.defaultValue !== undefined) {
+        value = param.defaultValue;
+      }
+      if (Number.isNaN(value)) {
+        missing.push(param.alias);
+      } else {
+        bindings[param.alias] = value;
+      }
+    }
+    if (missing.length > 0) {
+      setSandboxRun({
+        status: "error",
+        message: `Enter numeric values for: ${missing.join(", ")}`,
+      });
+      return null;
+    }
+    return bindings;
+  }
+
+  function runSandboxTest() {
+    if (!parseBody) {
+      setSandboxRun({ status: "error", message: "Enter a valid formula before running a test." });
+      return;
+    }
+    if (sandboxParameters.length === 0) {
+      setSandboxRun({
+        status: "error",
+        message: "No parameters are used in the expression yet.",
+      });
+      return;
+    }
+    const bindings = buildSandboxNumericBindings();
+    if (!bindings) {
+      return;
+    }
+    const result = evaluateFormulaSandbox(parseBody, bindings);
+    if (result.ok) {
+      setSandboxRun({ status: "success", value: result.value });
+    } else {
+      setSandboxRun({ status: "error", message: result.error });
+    }
+  }
+
+  useEffect(() => {
+    setSandboxRun({ status: "idle" });
+  }, [parseBody]);
+
+  const searchLower = inputSearch.trim().toLowerCase();
+
+  const filteredInsertables = useMemo(() => {
+    const items: Array<{ kind: "param" | "fn" | "op"; label: string; insert: string; detail?: string }> =
+      [];
+    for (const param of formulaParameters) {
+      const unit = resolveParameterUnit(param, unitByAlias);
+      items.push({
+        kind: "param",
+        label: param.alias,
+        insert: param.alias,
+        detail: parameterDetailLine(param, unit),
+      });
+    }
+    for (const group of FORMULA_TOOLBAR_GROUPS) {
+      for (const token of group.tokens) {
+        items.push({ kind: group.label === "Arithmetic" ? "op" : "fn", label: token, insert: token });
+      }
+    }
+    if (!searchLower) {
+      return items;
+    }
+    return items.filter(
+      (item) =>
+        item.label.toLowerCase().includes(searchLower) ||
+        (item.detail?.toLowerCase().includes(searchLower) ?? false),
+    );
+  }, [formulaParameters, searchLower, unitByAlias]);
+
+  const templateOptions = useMemo<TemplatePreset[]>(() => {
+    const [first, second] = variablePool;
+    if (!first) {
+      return [];
+    }
+    const a = first.alias;
+    const b = second?.alias ?? "beta";
     return [
       {
-        alias: targetAlias,
-        label: targetLabel,
-        instanceId: "11111111-1111-1111-1111-111111111111",
+        id: "generic-ratio",
+        label: "Ratio (BMI-style)",
+        expression: second
+          ? `${targetAlias} = ${a} / (${b} ^ 2)`
+          : `${targetAlias} = ${a}`,
       },
-      { alias: "weight", label: "Weight", instanceId: "22222222-2222-2222-2222-222222222222" },
-      { alias: "age", label: "Age", instanceId: "33333333-3333-3333-3333-333333333333" },
       {
-        alias: "creatinine",
-        label: "Creatinine",
-        instanceId: "44444444-4444-4444-4444-444444444444",
+        id: "generic-linear",
+        label: "Linear combination",
+        expression: second ? `${targetAlias} = ${a} + ${b}` : `${targetAlias} = ${a}`,
       },
-      { alias: "height", label: "Height", instanceId: "55555555-5555-5555-5555-555555555555" },
-      { alias: "bmi", label: "BMI", instanceId: "66666666-6666-6666-6666-666666666666" },
+      {
+        id: "generic-logistic",
+        label: "Logistic curve",
+        expression: `${targetAlias} = 1 / (1 + exp(-${a}))`,
+      },
+      {
+        id: "generic-product",
+        label: "Product",
+        expression: second ? `${targetAlias} = ${a} * ${b}` : `${targetAlias} = ${a}`,
+      },
     ];
-  }, [targetAlias, targetLabel, variablePool]);
-
-  const templatesByFramework = useMemo<Record<string, TemplatePreset[]>>(
-    () => ({
-      additive: [
-        { id: "add-bmi", label: "BMI ratio", expression: `${targetAlias} = weight / (height ^ 2)` },
-        {
-          id: "add-logit",
-          label: "Logit style",
-          expression: `${targetAlias} = 1 / (1 + exp(-(weight + age)))`,
-        },
-      ],
-      multiplicative: [
-        { id: "mul-basic", label: "Weighted product", expression: `${targetAlias} = weight * creatinine` },
-      ],
-      logistic: [{ id: "log-basic", label: "Classic logistic", expression: `${targetAlias} = 1 / (1 + exp(-weight))` }],
-      manual: [{ id: "manual", label: "Manual seed", expression: `${targetAlias} = weight` }],
-    }),
-    [targetAlias],
-  );
-  const genericTemplates: TemplatePreset[] = [
-    { id: "generic-ratio", label: "Ratio (BMI-style)", expression: `${targetAlias} = weight / (height ^ 2)` },
-    { id: "generic-linear", label: "Linear combination", expression: `${targetAlias} = weight + age` },
-  ];
-  const templateOptions = framework
-    ? (templatesByFramework[framework] ?? genericTemplates)
-    : genericTemplates;
-  const operatorTokens = ["+", "-", "*", "/", "^", "(", ")", "sqrt()", "log()", "exp()", "abs()"];
+  }, [targetAlias, variablePool]);
 
   function applyEditorValue(nextValue: string) {
     setExpression(nextValue);
@@ -232,40 +367,6 @@ export function FormulaPlaygroundSkeleton({
       currentModel.setValue(nextValue);
     }
   }
-
-  useEffect(() => {
-    let cancelled = false;
-    void import("mathlive").then(() => {
-      if (!cancelled) {
-        // Side-effect registers <math-field> custom element.
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    const mathfield = mathfieldRef.current;
-    if (!mathfield) return;
-
-    const onInput = () => {
-      const next = mathfield.value ?? "";
-      setExpression((previous) => (previous === next ? previous : next));
-    };
-    mathfield.addEventListener("input", onInput);
-    return () => {
-      mathfield.removeEventListener("input", onInput);
-    };
-  }, [inputMode]);
-
-  useEffect(() => {
-    const mathfield = mathfieldRef.current;
-    if (!mathfield) return;
-    if (mathfield.value !== expression) {
-      mathfield.value = expression;
-    }
-  }, [expression, inputMode]);
 
   function insertToken(token: string) {
     const editorInstance = editorRef.current;
@@ -281,30 +382,6 @@ export function FormulaPlaygroundSkeleton({
     editorInstance.focus();
     setExpression(model.getValue());
   }
-
-  const tabs = [
-    { key: "variables" as const, label: "Variables", icon: Link2 },
-    { key: "templates" as const, label: "Templates", icon: Sparkles },
-    { key: "deps" as const, label: "Deps", icon: FileCheck2 },
-  ];
-
-  useEffect(() => {
-    try {
-      const candidate = expression.split("=").slice(1).join("=").trim() || expression.trim();
-      if (!candidate) {
-        setRenderedMath("");
-        return;
-      }
-      const html = katex.renderToString(candidate, {
-        throwOnError: false,
-        displayMode: false,
-        strict: "ignore",
-      });
-      setRenderedMath(html);
-    } catch {
-      setRenderedMath("");
-    }
-  }, [expression]);
 
   useEffect(() => {
     const monaco = monacoRef.current;
@@ -342,7 +419,7 @@ export function FormulaPlaygroundSkeleton({
     if (!monaco || !monacoReady) return;
 
     completionRef.current?.dispose();
-    const functions = ["sqrt", "log", "abs", "exp", "pow", "min", "max"];
+        const functions = [...FORMULA_DSL_FUNCTIONS];
     completionRef.current = monaco.languages.registerCompletionItemProvider(
       FORMULA_LANGUAGE_ID,
       {
@@ -358,11 +435,11 @@ export function FormulaPlaygroundSkeleton({
             startColumn: word.startColumn,
             endColumn: word.endColumn,
           };
-          const variableItems = variables.map((item) => ({
+          const variableItems = formulaParameters.map((item) => ({
             label: item.alias,
             kind: monaco.languages.CompletionItemKind.Variable,
             insertText: item.alias,
-            detail: item.label,
+            detail: item.type === "STATIC" ? "Static parameter" : "Dynamic parameter",
             range,
           }));
           const functionItems = functions.map((name) => ({
@@ -379,7 +456,7 @@ export function FormulaPlaygroundSkeleton({
             ...(templateItem
               ? [
                   {
-                    label: `${framework ?? "generic"}-template`,
+                    label: "formula-template",
                     kind: monaco.languages.CompletionItemKind.Snippet,
                     insertText: templateItem.expression,
                     range,
@@ -396,7 +473,7 @@ export function FormulaPlaygroundSkeleton({
       completionRef.current?.dispose();
       completionRef.current = null;
     };
-  }, [framework, monacoReady, templateOptions, variables]);
+  }, [formulaParameters, monacoReady, templateOptions]);
 
   useEffect(() => {
     const monaco = monacoRef.current;
@@ -446,56 +523,65 @@ export function FormulaPlaygroundSkeleton({
   }, [monacoReady]);
 
   useEffect(() => {
-    const current = expression.trim();
-    if (!current) {
+    const body = toParseFormulaExpression(expression, targetAlias);
+    if (!body) {
+      setValidateState("idle");
+      setParseMetadata(null);
+      setDiagnostics([]);
+      setDependencies([]);
+      setDependencySummary(null);
       return;
     }
 
     const timer = setTimeout(async () => {
-      const knownAliases = variables.map((item) => item.alias);
-      const knownVariables: SimulationKnownVariable[] = variables.map((item) => ({
-        alias: item.alias,
-        instanceId: item.instanceId,
-      }));
+      const simulationPayload = parametersToSimulationPayload(formulaParameters);
+      const knownAliases = declaredAliases;
 
       setValidateState("validating");
       try {
         const normalized = await normalizeFormulaPreview({
-          expression: current,
+          expression: body,
           knownAliases,
-          editorMode: inputMode,
+          knownParameters: simulationPayload.knownParameters,
         });
 
         let nextDiagnostics = normalized.diagnostics ?? [];
         let deps =
           normalized.parseMetadata.variables.length > 0
             ? normalized.parseMetadata.variables
-            : extractLocalDependencies(current, knownAliases);
+            : extractLocalDependencies(body, knownAliases);
 
         const hasNormalizeError = nextDiagnostics.some(
           (item) => severityTone(item.severity) === "error",
         );
 
+        let summary = classifyFormulaDependencies(deps, formulaParameters);
+
         if (!hasNormalizeError) {
           const parseResult = await parseFormulaPreview({
-            framework: framework ?? undefined,
-            frameworkVersion: framework ? frameworkVersion : undefined,
-            expression: current,
-            knownVariables,
+            expression: body,
+            knownVariables: simulationPayload.knownVariables,
+            knownParameters: simulationPayload.knownParameters,
           });
-
-          if (parseResult.frameworkVersion && framework) {
-            setFrameworkVersion(parseResult.frameworkVersion);
-          }
 
           nextDiagnostics = [...nextDiagnostics, ...(parseResult.errors ?? [])];
           if ((parseResult.dependencies ?? []).length > 0) {
             deps = (parseResult.dependencies ?? []).map((dep) => dep.alias);
           }
+
+          summary =
+            parseResult.dependencySummary ??
+            classifyFormulaDependencies(deps, formulaParameters);
         }
 
+        setParseMetadata({
+          variables: normalized.parseMetadata.variables,
+          functions: normalized.parseMetadata.functions,
+          operators: normalized.parseMetadata.operators,
+        });
         setDiagnostics(nextDiagnostics);
         setDependencies(deps);
+        setDependencySummary(summary);
 
         const hasError = nextDiagnostics.some(
           (item) => severityTone(item.severity) === "error",
@@ -505,6 +591,7 @@ export function FormulaPlaygroundSkeleton({
         onParseUpdate?.({
           status: nextState,
           dependencies: deps,
+          dependencySummary: summary,
           errors: nextDiagnostics,
         });
       } catch {
@@ -521,419 +608,353 @@ export function FormulaPlaygroundSkeleton({
         onParseUpdate?.({
           status: "offline",
           dependencies: [],
+          dependencySummary: {
+            usedDynamic: [],
+            usedStatic: [],
+            undeclared: [],
+            unusedDeclared: [],
+          },
           errors: offlineDiagnostics,
         });
       }
-    }, 450);
+    }, PARSE_DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
-  }, [expression, framework, frameworkVersion, inputMode, onParseUpdate, variables]);
+  }, [
+    declaredAliases,
+    expression,
+    formulaParameters,
+    onParseUpdate,
+    targetAlias,
+  ]);
 
   const statusLabel =
     validateState === "validating"
-      ? "Validating"
+      ? "Validating…"
       : validateState === "valid"
-        ? "VALID"
+        ? "Valid"
         : validateState === "broken"
-          ? "BROKEN"
+          ? "Issues found"
           : validateState === "offline"
             ? "Offline"
-            : "Not validated";
-
-  const toolsTabBar = (
-    <div
-      className={cn(
-        "flex shrink-0 items-stretch border-white/[0.08]",
-        isStacked ? "border-b" : "border-b",
-      )}
-    >
-      {tabs.map(({ key, label, icon: Icon }) => {
-        const active = key === activeTab;
-        return (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setActiveTab(key)}
-            className={cn(
-              "inline-flex flex-1 items-center justify-center gap-1.5 border-b px-2 py-2.5 text-xs sm:flex-none sm:justify-start sm:px-3",
-              active
-                ? "border-[#f4f4f5] text-[#f4f4f5]"
-                : "border-transparent text-[#71717a] hover:text-[#d4d4d8]",
-            )}
-          >
-            <Icon className="size-3.5 shrink-0" />
-            {label}
-          </button>
-        );
-      })}
-    </div>
-  );
-
-  const toolsPanelBody = (
-    <div
-      className={cn(
-        "space-y-2 overflow-y-auto p-3",
-        isStacked ? "max-h-[min(180px,28vh)]" : "min-h-0 flex-1",
-      )}
-    >
-      {activeTab === "variables" ? (
-        <>
-          {variables.map((variable) => (
-            <button
-              key={variable.alias}
-              type="button"
-              onClick={() => insertToken(variable.alias)}
-              className="flex w-full items-center justify-between rounded-md border border-white/[0.08] bg-white/[0.02] px-2 py-1.5 text-left text-xs text-[#e4e4e7] hover:bg-white/[0.06]"
-            >
-              <div className="min-w-0">
-                <p className="truncate">{variable.alias}</p>
-                <p className="truncate text-[10px] text-[#71717a]">{variable.label}</p>
-              </div>
-              <span className="shrink-0 text-[10px] text-[#71717a]">Insert</span>
-            </button>
-          ))}
-        </>
-      ) : null}
-
-      {activeTab === "templates" ? (
-        <>
-          {templateOptions.map((template) => (
-            <button
-              key={template.id}
-              type="button"
-              onClick={() => applyEditorValue(template.expression)}
-              className="w-full rounded-md border border-white/[0.08] bg-white/[0.02] px-2 py-1.5 text-left text-xs text-[#e4e4e7] hover:bg-white/[0.06]"
-            >
-              <p>{template.label}</p>
-              <p className="mt-1 text-[10px] text-zinc-400">{template.expression}</p>
-            </button>
-          ))}
-        </>
-      ) : null}
-
-      {activeTab === "deps" ? (
-        <div className="space-y-2">
-          {dependencies.length === 0 ? (
-            <p className="rounded-md border border-white/[0.08] bg-white/[0.02] px-2 py-1.5 text-xs text-[#71717a]">
-              No dependencies detected yet.
-            </p>
-          ) : (
-            dependencies.map((dep) => (
-              <div
-                key={dep}
-                className="rounded-md border border-white/[0.08] bg-white/[0.02] px-2 py-1.5 text-xs text-[#e4e4e7]"
-              >
-                {dep}
-              </div>
-            ))
-          )}
-        </div>
-      ) : null}
-    </div>
-  );
-
-  const toolsAside = (
-    <aside
-      className={cn(
-        "flex min-w-0 flex-col",
-        isStacked ? "border-b border-white/[0.08] bg-[#0f0f11]" : "min-h-0",
-      )}
-    >
-      {toolsTabBar}
-      {toolsPanelBody}
-    </aside>
-  );
-
-  const operatorToolbar = (
-    <div className="mb-3 overflow-x-auto pb-0.5">
-      <div className="flex w-max min-w-full flex-nowrap gap-1.5">
-        {operatorTokens.map((token) => (
-          <button
-            key={token}
-            type="button"
-            onClick={() => insertToken(token)}
-            className="shrink-0 rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-[11px] text-zinc-300 hover:bg-white/[0.08]"
-          >
-            {token}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-
-  const editorSurface =
-    inputMode === "monaco" ? (
-      <div
-        className="overflow-hidden rounded-md border border-white/[0.08] bg-[#0b0b0d]"
-        style={{ height: editorHeight }}
-      >
-        <MonacoEditor
-          height={editorHeight}
-          language={FORMULA_LANGUAGE_ID}
-          theme="vs-dark"
-          value={expression}
-          beforeMount={registerFormulaMonacoLanguage}
-          onMount={(editorInstance, monaco) => {
-            editorRef.current = editorInstance;
-            monacoRef.current = monaco;
-            setMonacoReady(true);
-          }}
-          onChange={(value) => applyEditorValue(value ?? "")}
-          options={{
-            minimap: { enabled: false },
-            wordWrap: "on",
-            lineNumbers: "on",
-            fontSize: 13,
-            automaticLayout: true,
-            suggestOnTriggerCharacters: true,
-          }}
-        />
-      </div>
-    ) : (
-      <div
-        className="overflow-auto rounded-md border border-white/[0.08] bg-[#0b0b0d] p-3"
-        style={{ height: editorHeight }}
-      >
-        <math-field
-          ref={(node) => {
-            mathfieldRef.current = node as MathfieldElement | null;
-          }}
-          className="block min-h-[240px] w-full rounded border border-white/10 bg-[#0f0f12] p-3 text-base text-zinc-100"
-        />
-      </div>
-    );
-
-  const editorPanel = (
-    <div
-      className={cn(
-        "min-w-0 p-3",
-        !isStacked && "border-r border-white/[0.08]",
-      )}
-    >
-      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-[#71717a]">
-            Expression
-          </p>
-          <p className="mt-0.5 text-[11px] text-[#52525b]">{framework ?? "generic"}</p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setInputMode("monaco")}
-            className={cn(
-              "rounded border px-2 py-1 text-[11px]",
-              inputMode === "monaco"
-                ? "border-cyan-400/60 bg-cyan-500/10 text-cyan-200"
-                : "border-white/10 bg-white/[0.03] text-zinc-300",
-            )}
-          >
-            Monaco
-          </button>
-          <button
-            type="button"
-            onClick={() => setInputMode("mathlive")}
-            className={cn(
-              "rounded border px-2 py-1 text-[11px]",
-              inputMode === "mathlive"
-                ? "border-cyan-400/60 bg-cyan-500/10 text-cyan-200"
-                : "border-white/10 bg-white/[0.03] text-zinc-300",
-            )}
-          >
-            MathLive
-          </button>
-        </div>
-      </div>
-
-      {operatorToolbar}
-      {editorSurface}
-
-      {renderedMath ? (
-        <div className="mt-3 rounded-md border border-white/10 bg-[#0f0f12] p-3">
-          <p className="mb-2 text-[11px] uppercase tracking-wide text-zinc-400">Preview</p>
-          <div
-            className="overflow-x-auto text-zinc-100"
-            dangerouslySetInnerHTML={{ __html: renderedMath }}
-          />
-        </div>
-      ) : null}
-    </div>
-  );
+            : "Waiting for input";
 
   return (
-    <section className="@container overflow-hidden rounded-xl border border-white/[0.08] bg-[#121214]">
-      <div className="border-b border-white/[0.08] px-4 py-3">
-        <div
-          className={cn(
-            "flex flex-col gap-3",
-            !isStacked && "lg:flex-row lg:flex-wrap lg:items-start lg:justify-between",
-          )}
-        >
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-base font-semibold text-[#f4f4f5]">
-              {targetLabel} - Formula Editor
-            </p>
-            <p className="mt-1 text-xs text-[#a1a1aa]">
-              {framework
-                ? `${framework} framework strategy`
-                : "Generic expression (no framework strategy)"}{" "}
-              - draft v{governanceVersion ?? 1}
-            </p>
-          </div>
-
-          <div
+    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-white/[0.08] bg-[#121214]">
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] px-4 py-3">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-[#f4f4f5]">
+            Step 3 — Formula Studio
+          </p>
+          <p className="mt-0.5 truncate text-xs text-[#71717a]">
+            {targetLabel} · <span className="font-mono">{targetAlias}</span> · draft v
+            {governanceVersion ?? 1}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span
             className={cn(
-              "flex flex-col gap-3",
-              isStacked ? "w-full" : "w-full sm:w-auto sm:min-w-[200px] lg:max-w-[220px]",
+              "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium",
+              validateState === "valid"
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                : validateState === "broken"
+                  ? "border-rose-500/30 bg-rose-500/10 text-rose-200"
+                  : "border-amber-500/30 bg-amber-500/10 text-amber-200",
             )}
           >
-            <div>
-              <label className="mb-1 block text-[10px] uppercase tracking-wide text-zinc-400">
-                Framework strategy
-              </label>
-              <select
-                value={framework ?? ""}
-                onChange={(event) =>
-                  onFrameworkChange?.(event.target.value.length > 0 ? event.target.value : null)
-                }
-                className="w-full rounded border border-white/10 bg-[#121216] px-2 py-1.5 text-xs text-zinc-100"
-                disabled={!onFrameworkChange || frameworkLocked}
-              >
-                <option value="">None (generic expression)</option>
-                {(frameworkOptions.length ? frameworkOptions : framework ? [framework] : []).map(
-                  (item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ),
-                )}
-              </select>
-            </div>
+            {validateState === "validating" ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : null}
+            {statusLabel}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              const stored = toStoredFormulaExpression(expression, targetAlias);
+              if (onSaveDraft && stored) {
+                void onSaveDraft(stored).catch(() => undefined);
+              }
+            }}
+            disabled={isSavingDraft || !toStoredFormulaExpression(expression, targetAlias)}
+            className="inline-flex items-center gap-1 rounded-md border border-white/[0.12] bg-white/[0.02] px-3 py-1.5 text-xs text-[#e4e4e7] hover:bg-white/[0.06]"
+          >
+            {isSavingDraft ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+            Save draft
+          </button>
+          <button
+            type="button"
+            onClick={() => onSubmitForReview && void onSubmitForReview().catch(() => undefined)}
+            disabled={isSubmittingReview || !canSubmitForReview}
+            className="inline-flex items-center gap-1 rounded-md border border-white/[0.08] px-3 py-1.5 text-xs text-[#a1a1aa] disabled:opacity-50"
+          >
+            {isSubmittingReview ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+            Submit
+          </button>
+        </div>
+      </header>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center rounded-md border border-amber-400/25 bg-amber-400/10 px-2 py-1 text-[11px] font-medium text-amber-200">
-                {statusLabel}
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  if (onSaveDraft) {
-                    void onSaveDraft(expression.trim()).catch(() => undefined);
-                  }
+      <div className="grid min-h-0 flex-1 overflow-hidden grid-cols-1 grid-rows-[auto_auto_auto] lg:grid-cols-[minmax(200px,240px)_minmax(0,1fr)_minmax(260px,320px)] lg:grid-rows-1">
+        {/* LEFT — Inputs */}
+        <aside className="flex max-h-[min(280px,38vh)] min-h-0 flex-col overflow-hidden border-b border-white/[0.08] lg:max-h-none lg:border-r lg:border-b-0">
+          <div className="shrink-0 border-b border-white/[0.08] p-3">
+            <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-[#71717a]">
+              Inputs
+            </p>
+            <div className="relative">
+              <Search className="pointer-events-none absolute top-2 left-2 size-3.5 text-[#52525b]" />
+              <input
+                type="search"
+                value={inputSearch}
+                onChange={(e) => setInputSearch(e.target.value)}
+                placeholder="Search parameters, functions…"
+                className="w-full rounded-md border border-white/10 bg-white/[0.03] py-1.5 pr-8 pl-8 text-xs text-zinc-200"
+              />
+              {inputSearch ? (
+                <button
+                  type="button"
+                  onClick={() => setInputSearch("")}
+                  className="absolute top-2 right-2 text-[#71717a] hover:text-zinc-300"
+                >
+                  <X className="size-3.5" />
+                </button>
+              ) : null}
+            </div>
+          </div>
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-y-contain p-3 [-webkit-overflow-scrolling:touch]">
+            {formulaParameters.length === 0 ? (
+              <p className="text-[10px] text-amber-200/80">
+                No parameters declared. Go back to Step 2 — Parameters.
+              </p>
+            ) : (
+              <div>
+                <p className="mb-1.5 text-[9px] uppercase tracking-wide text-[#52525b]">
+                  Parameters
+                </p>
+                {filteredInsertables
+                  .filter((item) => item.kind === "param")
+                  .map((item) => (
+                    <button
+                      key={item.label}
+                      type="button"
+                      onClick={() => insertToken(item.insert)}
+                      className="mb-1 flex w-full flex-col rounded-md border border-white/[0.08] bg-white/[0.02] px-2 py-1.5 text-left hover:bg-white/[0.06]"
+                    >
+                      <span className="font-mono text-xs text-[#e4e4e7]">{item.label}</span>
+                      {item.detail ? (
+                        <span className="text-[10px] text-[#71717a]">{item.detail}</span>
+                      ) : null}
+                    </button>
+                  ))}
+              </div>
+            )}
+            <div>
+              <p className="mb-1.5 text-[9px] uppercase tracking-wide text-[#52525b]">
+                Functions
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {filteredInsertables
+                  .filter((item) => item.kind === "fn")
+                  .map((item) => (
+                    <button
+                      key={item.label}
+                      type="button"
+                      onClick={() => insertToken(item.insert)}
+                      className="rounded border border-white/10 bg-white/[0.03] px-1.5 py-0.5 font-mono text-[10px] text-zinc-300 hover:bg-white/[0.08]"
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+              </div>
+            </div>
+            <div>
+              <p className="mb-1.5 text-[9px] uppercase tracking-wide text-[#52525b]">
+                Operators
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {filteredInsertables
+                  .filter((item) => item.kind === "op")
+                  .map((item) => (
+                    <button
+                      key={item.label}
+                      type="button"
+                      onClick={() => insertToken(item.insert)}
+                      className="rounded border border-white/10 bg-white/[0.03] px-1.5 py-0.5 font-mono text-[10px] text-zinc-300 hover:bg-white/[0.08]"
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+              </div>
+            </div>
+            {templateOptions.length > 0 ? (
+              <div>
+                <p className="mb-1.5 text-[9px] uppercase tracking-wide text-[#52525b]">
+                  Templates
+                </p>
+                {templateOptions.map((template) => (
+                  <button
+                    key={template.id}
+                    type="button"
+                    onClick={() => applyEditorValue(template.expression)}
+                    className="mb-1 w-full rounded-md border border-white/[0.08] bg-white/[0.02] px-2 py-1.5 text-left text-[10px] text-[#a1a1aa] hover:bg-white/[0.06]"
+                  >
+                    {template.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </aside>
+
+        {/* CENTER — Editor */}
+        <div className="flex min-h-[min(320px,45vh)] min-w-0 flex-col overflow-hidden border-b border-white/[0.08] lg:min-h-0 lg:flex-1 lg:border-b-0">
+          <div className="shrink-0 border-b border-white/[0.08] px-4 py-2">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-[#71717a]">
+              Formula editor
+            </p>
+            <p className="font-mono text-xs text-[#a1a1aa]">
+              {targetAlias} = <span className="text-[#52525b]">ASCII DSL</span>
+              {targetUnitLabel ? (
+                <span className="text-[#71717a]"> · output unit: {targetUnitLabel}</span>
+              ) : null}
+            </p>
+          </div>
+          <div className="min-h-0 flex-1 p-3">
+            <div className="h-full min-h-[280px] overflow-hidden rounded-md border border-white/[0.08] bg-[#0b0b0d]">
+              <MonacoEditor
+                height="100%"
+                language={FORMULA_LANGUAGE_ID}
+                theme="vs-dark"
+                value={expression}
+                beforeMount={registerFormulaMonacoLanguage}
+                onMount={(editorInstance, monaco) => {
+                  editorRef.current = editorInstance;
+                  monacoRef.current = monaco;
+                  setMonacoReady(true);
                 }}
-                disabled={isSavingDraft}
-                className="inline-flex items-center gap-1 rounded-md border border-white/[0.12] bg-white/[0.02] px-3 py-1.5 text-xs font-medium text-[#e4e4e7] hover:bg-white/[0.06]"
-              >
-                {isSavingDraft ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <Save className="size-3.5" />
-                )}
-                {isSavingDraft ? "Saving..." : "Save draft"}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (onSubmitForReview) {
-                    void onSubmitForReview().catch(() => undefined);
-                  }
+                onChange={(value) => applyEditorValue(value ?? "")}
+                options={{
+                  minimap: { enabled: false },
+                  wordWrap: "on",
+                  lineNumbers: "on",
+                  fontSize: 14,
+                  automaticLayout: true,
+                  suggestOnTriggerCharacters: true,
+                  padding: { top: 12, bottom: 12 },
                 }}
-                disabled={isSubmittingReview || !canSubmitForReview}
-                className="inline-flex items-center gap-1 rounded-md border border-white/[0.08] bg-white/[0.02] px-3 py-1.5 text-xs font-medium text-[#71717a] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isSubmittingReview ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <Send className="size-3.5" />
-                )}
-                {isSubmittingReview ? "Submitting..." : "Submit for review"}
-              </button>
+              />
             </div>
           </div>
         </div>
+
+        {/* RIGHT — output unit + test */}
+        <aside className="flex max-h-[min(360px,48vh)] min-h-0 flex-col overflow-hidden bg-[#0f0f11] lg:max-h-none lg:border-l lg:border-white/[0.08]">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-y-contain p-3 text-xs [-webkit-overflow-scrolling:touch]">
+            <div>
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[#71717a]">
+                Output unit
+              </p>
+              {targetUnitLabel ? (
+                <p className="font-mono text-sm text-[#e4e4e7]">{targetUnitLabel}</p>
+              ) : (
+                <p className="text-[10px] text-[#71717a]">Not set on this outcome.</p>
+              )}
+            </div>
+
+            <StudioSection title="Test">
+              {sandboxParameters.length === 0 ? (
+                <p className="text-[10px] text-[#71717a]">
+                  Use parameters in the formula to enable testing.
+                </p>
+              ) : (
+                <>
+                  <div className="space-y-1.5">
+                    {sandboxParameters.map((param) => {
+                      const unit = resolveParameterUnit(param, unitByAlias);
+                      return (
+                        <label key={param.alias} className="block">
+                          <span className="mb-0.5 flex items-baseline gap-1 font-mono text-[10px] text-[#a1a1aa]">
+                            {param.alias}
+                            {unit ? (
+                              <span className="font-sans text-[#52525b]">({unit})</span>
+                            ) : null}
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={sandboxDraft[param.alias] ?? ""}
+                              onChange={(e) => {
+                                setSandboxRun({ status: "idle" });
+                                setSandboxDraft((prev) => ({
+                                  ...prev,
+                                  [param.alias]: e.target.value,
+                                }));
+                              }}
+                              placeholder={
+                                param.type === "STATIC"
+                                  ? String(param.defaultValue ?? "0")
+                                  : "0"
+                              }
+                              className="min-w-0 flex-1 rounded border border-white/10 bg-white/[0.03] px-2 py-1 font-mono text-[11px] text-zinc-200"
+                            />
+                            {unit ? (
+                              <span className="shrink-0 text-[10px] font-medium text-[#71717a]">
+                                {unit}
+                              </span>
+                            ) : null}
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={runSandboxTest}
+                    disabled={!parseBody || validateState === "broken"}
+                    className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-cyan-500/40 bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-100 hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Play className="size-3.5" />
+                    Run test
+                  </button>
+
+                  {sandboxRun.status === "success" ? (
+                    <p className="mt-2 font-mono text-base text-cyan-100">
+                      {formatValueWithUnit(
+                        sandboxRun.value?.toPrecision(6) ?? "",
+                        targetUnitLabel,
+                      )}
+                    </p>
+                  ) : null}
+                  {sandboxRun.status === "error" ? (
+                    <p className="mt-2 text-[11px] text-amber-200/90">{sandboxRun.message}</p>
+                  ) : null}
+                </>
+              )}
+            </StudioSection>
+          </div>
+        </aside>
       </div>
-
-      <div
-        className={cn(
-          "grid min-w-0",
-          isStacked
-            ? "grid-cols-1"
-            : "min-h-[420px] grid-cols-1 @min-[900px]:grid-cols-[minmax(0,1fr)_280px]",
-        )}
-      >
-        {isStacked ? (
-          <>
-            {toolsAside}
-            {editorPanel}
-          </>
-        ) : (
-          <>
-            {editorPanel}
-            {toolsAside}
-          </>
-        )}
-      </div>
-
-      <div
-        className={cn(
-          "grid gap-3 border-t border-white/[0.08] bg-[#0f0f12] p-3 text-xs",
-          isStacked ? "grid-cols-1 sm:grid-cols-3" : "md:grid-cols-3",
-        )}
-      >
-        <div>
-          <p className="text-[11px] uppercase tracking-wide text-[#71717a]">Target</p>
-          <p className="mt-1 text-[#e4e4e7]">{targetLabel}</p>
-        </div>
-        <div>
-          <p className="text-[11px] uppercase tracking-wide text-[#71717a]">Status</p>
-          <p className="mt-1 inline-flex items-center gap-1 rounded-md border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-emerald-200">
-            {validateState === "validating" ? <Loader2 className="size-3.5 animate-spin" /> : <CircleCheck className="size-3.5" />}
-            {governanceStatus ?? statusLabel}
-          </p>
-          {governanceReason ? (
-            <p className="mt-1 line-clamp-2 text-[11px] text-zinc-400">{governanceReason}</p>
-          ) : null}
-          {governanceUpdatedAt ? (
-            <p className="mt-1 text-[11px] text-zinc-500">
-              Updated {new Date(governanceUpdatedAt).toLocaleString()}
-            </p>
-          ) : null}
-        </div>
-        <div>
-          <p className="text-[11px] uppercase tracking-wide text-[#71717a]">Dependencies</p>
-          <p className="mt-1 text-[#e4e4e7]">{dependencies.join(", ") || "—"}</p>
-        </div>
-      </div>
-
-      {diagnostics.length > 0 ? (
-        <div className="space-y-2 border-t border-white/[0.08] bg-[#111114] p-3 text-xs">
-          {diagnostics.map((item, index) => {
-            const tone = severityTone(item.severity);
-            const styles =
-              tone === "error"
-                ? "border-rose-500/25 bg-rose-500/10 text-rose-200/90"
-                : tone === "warning"
-                  ? "border-amber-500/25 bg-amber-500/10 text-amber-200/90"
-                  : "border-sky-500/25 bg-sky-500/10 text-sky-200/90";
-
-            const Icon = tone === "error" ? CircleAlert : tone === "warning" ? Beaker : Info;
-            const hint = diagnosticHint(item);
-
-            return (
-              <div
-                key={`${item.type}-${index}`}
-                className={`flex items-start gap-2 rounded-md border p-2 ${styles}`}
-              >
-                <Icon className="mt-0.5 size-3.5 shrink-0" />
-                <div className="min-w-0">
-                  <p>{diagnosticSummary(item.message)}</p>
-                  {hint ? <p className="mt-1 text-[11px] opacity-90">{hint}</p> : null}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      ) : null}
     </section>
   );
 }
+
+function StudioSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <section>
+      <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[#71717a]">
+        {title}
+      </p>
+      {children}
+    </section>
+  );
+}
+
+/** @deprecated Use FormulaStudio */
+export const FormulaPlaygroundSkeleton = FormulaStudio;

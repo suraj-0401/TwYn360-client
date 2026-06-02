@@ -92,7 +92,9 @@ export default function CategoriesPage() {
       {showSkeleton ? <FactorTableSkeleton /> : null}
 
       {data && !error ? (
+        <div className="flex min-h-0 flex-1 flex-col">
         <RegistryListCard
+          className="min-h-0 flex-1"
           total={data.pagination.total}
           isFetching={isFetching}
           isLoading={isLoading}
@@ -134,6 +136,7 @@ export default function CategoriesPage() {
             <CategoryTable items={data.items} variant="platform" />
           ) : null}
         </RegistryListCard>
+        </div>
       ) : null}
     </RegistryListShell>
   );

@@ -1,3 +1,26 @@
+export type FormulaParameterDto = {
+  id?: string;
+  alias: string;
+  type: "DYNAMIC" | "STATIC";
+  sourceType?: "FACTOR_INSTANCE" | "DERIVED_FACTOR" | null;
+  instanceId?: string | null;
+  derivedFactorId?: string | null;
+  defaultValue?: number | null;
+  label?: string | null;
+  sortOrder?: number;
+};
+
+export type FormulaParameterInput = {
+  alias: string;
+  type: "DYNAMIC" | "STATIC";
+  sourceType?: "FACTOR_INSTANCE" | "DERIVED_FACTOR";
+  instanceId?: string;
+  derivedFactorId?: string;
+  defaultValue?: number;
+  label?: string;
+  sortOrder?: number;
+};
+
 export type ExtractedDependenciesDto = {
   variables: string[];
   functions: string[];
@@ -17,6 +40,7 @@ export type FormulaDto = {
   status: string;
   rawExpression: string;
   aliasMap: Record<string, string> | null;
+  formulaParameters?: FormulaParameterDto[];
   extractedDependencies: ExtractedDependenciesDto | null;
   dependencyHash: string | null;
   compiledAt: string | null;
@@ -49,6 +73,7 @@ export type FormulaVersionDto = {
   snapshotFramework: string | null;
   snapshotFrameworkVersion: string | null;
   snapshotCoefficients: unknown;
+  snapshotParameters?: unknown;
   changeNote: string | null;
   createdBy: string | null;
   createdAt: string;

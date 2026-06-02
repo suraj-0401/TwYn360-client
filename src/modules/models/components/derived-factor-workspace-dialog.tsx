@@ -27,15 +27,33 @@ import {
   submitFormulaForReview,
   updateFormula,
 } from "@/services/formula.service";
-import { listSimulationFrameworks } from "@/services/simulation-formula.service";
+import type { SimulationDependencySummary } from "@/services/simulation-formula.service";
 import {
   useDerivedFactor,
   useDerivedFactorMutations,
 } from "../hooks/use-derived-factors";
 import { DerivedFactorForm } from "./derived-factor-form";
-import { FormulaPlaygroundSkeleton } from "./formula-playground-skeleton";
+import { FormulaStudio } from "./formula-playground-skeleton";
+import { FormulaParametersStep } from "./formula-parameters-step";
+import {
+  FormulaWorkspaceStepper,
+  type FormulaWorkspaceStep,
+} from "./formula-workspace-stepper";
 import type { DerivedFactorUpdatePayload } from "../utils/derived-factor-workspace-values";
-import type { FormulaDto, FormulaVersionDto } from "@/types/formula";
+import { dtoToParameterInput } from "@/modules/models/utils/formula-parameters";
+import type {
+  FormulaDto,
+  FormulaParameterInput,
+  FormulaVersionDto,
+} from "@/types/formula";
+import type { FormulaVariablePoolItem } from "@/modules/models/utils/formula-variable-pool";
+
+const EMPTY_DEPENDENCY_SUMMARY: SimulationDependencySummary = {
+  usedDynamic: [],
+  usedStatic: [],
+  undeclared: [],
+  unusedDeclared: [],
+};
 
 const DETAILS_FORM_ID = "derived-factor-details-form";
 
@@ -45,12 +63,16 @@ type DerivedFactorWorkspaceDialogProps = {
   modelId: string;
   derivedFactorId: string | null;
   readOnly?: boolean;
-  variablePool: Array<{ alias: string; label: string; instanceId: string }>;
+  variablePool: FormulaVariablePoolItem[];
   initialTab?: "details" | "formula";
   onDeleted?: () => void;
 };
 
 type WorkspaceTab = "details" | "formula";
+
+function toFlowStep(tab: WorkspaceTab): FormulaWorkspaceStep {
+  return tab === "formula" ? "studio" : "basics";
+}
 
 function resolveFormulaRecord(payload: unknown): FormulaDto | null {
   if (!payload || typeof payload !== "object") {
@@ -82,23 +104,24 @@ export function DerivedFactorWorkspaceDialog({
   const { updateMutation, deleteMutation } = useDerivedFactorMutations(modelId);
   const derivedQuery = useDerivedFactor(modelId, open ? derivedFactorId : null);
 
-  const [activeTab, setActiveTab] = useState<WorkspaceTab>(initialTab);
+  const [flowStep, setFlowStep] = useState<FormulaWorkspaceStep>(toFlowStep(initialTab));
   const [reviewNote, setReviewNote] = useState("");
   const [decisionNote, setDecisionNote] = useState("");
-  const [selectedFramework, setSelectedFramework] = useState<string | null>(null);
-  const [parseDependencies, setParseDependencies] = useState<string[]>([]);
+  const [dependencySummary, setDependencySummary] =
+    useState<SimulationDependencySummary>(EMPTY_DEPENDENCY_SUMMARY);
+  const [formulaParameters, setFormulaParameters] = useState<FormulaParameterInput[]>([]);
   const [savingDetails, setSavingDetails] = useState(false);
 
   const derived = derivedQuery.data ?? null;
 
   useEffect(() => {
     if (!open) {
-      setActiveTab(initialTab);
+      setFlowStep(toFlowStep(initialTab));
       setReviewNote("");
       setDecisionNote("");
       return;
     }
-    setActiveTab(initialTab);
+    setFlowStep(toFlowStep(initialTab));
   }, [open, derivedFactorId, initialTab]);
 
   const formulaQuery = useQuery({
@@ -109,22 +132,7 @@ export function DerivedFactorWorkspaceDialog({
     retry: false,
   });
 
-  const frameworksQuery = useQuery({
-    queryKey: ["simulation-frameworks"],
-    queryFn: async () => listSimulationFrameworks(),
-    retry: false,
-    enabled: open,
-  });
-
   const currentFormula = resolveFormulaRecord(formulaQuery.data);
-  const frameworkOptions = useMemo(
-    () => frameworksQuery.data?.map((item) => item.framework) ?? [],
-    [frameworksQuery.data],
-  );
-
-  useEffect(() => {
-    setSelectedFramework(currentFormula?.framework ?? null);
-  }, [derived?.id, currentFormula?.id, currentFormula?.framework]);
 
   const versionQuery = useQuery({
     queryKey: ["formula-versions", currentFormula?.id],
@@ -135,16 +143,26 @@ export function DerivedFactorWorkspaceDialog({
 
   const canSubmitForReview =
     Boolean(currentFormula) &&
-    currentFormula?.status?.toLowerCase() !== "broken" &&
-    currentFormula?.status?.toLowerCase() !== "archived";
+    currentFormula?.status?.toLowerCase() === "valid";
   const canReviewDecision = currentFormula?.status?.toLowerCase() === "pending_review";
-  const variableAliases = new Set(variablePool.map((item) => item.alias));
-  const missingDependencies = parseDependencies.filter((alias) => !variableAliases.has(alias));
+  const missingDependencies = dependencySummary.undeclared;
+
+  const initialFormulaParameters = useMemo(
+    () =>
+      currentFormula?.formulaParameters
+        ? dtoToParameterInput(currentFormula.formulaParameters)
+        : [],
+    [currentFormula?.formulaParameters, currentFormula?.id],
+  );
+
+  useEffect(() => {
+    setFormulaParameters(initialFormulaParameters);
+  }, [initialFormulaParameters]);
   const latestVersion = (versionQuery.data?.[0] ?? null) as FormulaVersionDto | null;
 
   const handleParseUpdate = useCallback(
-    ({ dependencies }: { dependencies: string[] }) => {
-      setParseDependencies(dependencies);
+    ({ dependencySummary: summary }: { dependencySummary: SimulationDependencySummary }) => {
+      setDependencySummary(summary);
     },
     [],
   );
@@ -155,20 +173,15 @@ export function DerivedFactorWorkspaceDialog({
         return null;
       }
       const existing = currentFormula;
-      const aliasMap = Object.fromEntries(variablePool.map((item) => [item.alias, item.instanceId]));
-
       if (existing) {
         return (
           await updateFormula(existing.id, {
             rawExpression: expression,
-            aliasMap,
-            framework: selectedFramework,
+            formulaParameters,
             expectedVersion: existing.version,
           })
         ).data;
       }
-
-      const frameworkFields = selectedFramework ? { framework: selectedFramework } : {};
 
       return (
         await createFormula(modelId, {
@@ -177,9 +190,8 @@ export function DerivedFactorWorkspaceDialog({
           targetId: derived.id,
           formulaKind: "derived_factor",
           formulaType: "deterministic",
-          ...frameworkFields,
           rawExpression: expression,
-          aliasMap,
+          formulaParameters,
           manualMode: false,
         })
       ).data;
@@ -284,11 +296,11 @@ export function DerivedFactorWorkspaceDialog({
       <DialogContent
         showCloseButton
         className={cn(
-          "fixed top-0 right-0 left-auto flex h-full max-h-none w-full max-w-4xl translate-x-0 translate-y-0 flex-col rounded-none border-l border-white/[0.08] bg-[#0c0c0e] p-0",
+          "fixed top-0 right-0 left-auto flex h-full max-h-none w-[min(1600px,92vw)] max-w-none translate-x-0 translate-y-0 flex-col rounded-none border-l border-white/[0.08] bg-[#0c0c0e] p-0 sm:max-w-none",
           "data-open:slide-in-from-right data-closed:slide-out-to-right",
         )}
       >
-        <DialogHeader className="border-b border-white/[0.06] px-5 py-4">
+        <DialogHeader className="shrink-0 border-b border-white/[0.06] px-5 py-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <DialogTitle className="text-[#f4f4f5]">
@@ -321,38 +333,30 @@ export function DerivedFactorWorkspaceDialog({
             </div>
           </div>
 
-          <div className="mt-3 flex gap-0.5 border-b border-white/[0.06]">
-            {(
-              [
-                { id: "details" as const, label: "Details" },
-                { id: "formula" as const, label: "Formula" },
-              ] as const
-            ).map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className={cn(
-                  "px-3 py-2 text-sm transition-colors",
-                  activeTab === tab.id
-                    ? "text-[#f4f4f5] after:block after:h-0.5 after:bg-cyan-400/80"
-                    : "text-[#71717a] hover:text-[#a1a1aa]",
-                )}
-              >
-                {tab.label}
-              </button>
-            ))}
+          <div className="mt-3">
+            <FormulaWorkspaceStepper
+              active={flowStep}
+              onStepClick={(step) => setFlowStep(step)}
+              completedThrough={
+                formulaParameters.length > 0 ? "parameters" : "basics"
+              }
+            />
           </div>
         </DialogHeader>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div
+          className={cn(
+            "min-h-0 flex-1 overflow-y-auto px-5 py-4",
+            flowStep === "studio" && "overflow-hidden px-0 py-0",
+          )}
+        >
           {derivedQuery.isLoading ? <FactorTableSkeleton /> : null}
 
           {derivedQuery.error ? (
             <p className="text-sm text-rose-300">Could not load derived factor.</p>
           ) : null}
 
-          {derived && activeTab === "details" ? (
+          {derived && flowStep === "basics" ? (
             <div className="space-y-4">
               <p className="text-xs text-[#52525b]">
                 Slug <span className="font-mono text-[#71717a]">{derived.slug}</span> is fixed after
@@ -395,65 +399,80 @@ export function DerivedFactorWorkspaceDialog({
             </div>
           ) : null}
 
-          {derived && activeTab === "formula" ? (
-            <div className="space-y-4">
-              {variablePool.length === 0 ? (
-                <p className="text-xs text-amber-300">
-                  Attach factor sets on this model before authoring derived formulas. Only raw
-                  factor slugs can be used as variables.
-                </p>
-              ) : null}
-
-              {missingDependencies.length > 0 ? (
-                <p className="text-xs text-amber-300">
-                  Unknown aliases: {missingDependencies.join(", ")}
-                </p>
-              ) : null}
-
-              <FormulaPlaygroundSkeleton
-                key={derived.id}
-                layout="stacked"
-                targetLabel={derived.displayName}
-                targetAlias={derived.slug}
-                framework={selectedFramework}
-                frameworkOptions={frameworkOptions}
-                onFrameworkChange={(next) => setSelectedFramework(next)}
-                frameworkLocked={Boolean(currentFormula)}
-                initialExpression={currentFormula?.rawExpression ?? `${derived.slug} = `}
-                governanceStatus={currentFormula?.status ?? null}
-                governanceVersion={currentFormula?.version ?? null}
-                governanceUpdatedAt={currentFormula?.updatedAt ?? null}
-                governanceReason={currentFormula?.validationStatusReason ?? null}
-                onSaveDraft={
-                  readOnly
-                    ? undefined
-                    : async (expression) => {
-                        await saveDraftMutation.mutateAsync(expression);
-                      }
-                }
-                onSubmitForReview={
-                  readOnly
-                    ? undefined
-                    : async () => {
-                        await submitReviewMutation.mutateAsync();
-                      }
-                }
-                isSavingDraft={saveDraftMutation.isPending}
-                isSubmittingReview={submitReviewMutation.isPending}
-                canSubmitForReview={canSubmitForReview}
-                onParseUpdate={handleParseUpdate}
+          {derived && flowStep === "parameters" ? (
+            <div className="flex h-full min-h-0 flex-1 flex-col">
+              <FormulaParametersStep
                 variablePool={variablePool}
+                parameters={formulaParameters}
+                onChange={setFormulaParameters}
+                readOnly={readOnly}
               />
+            </div>
+          ) : null}
 
+          {derived && flowStep === "studio" ? (
+            <div className="flex h-full min-h-0 flex-1 flex-col">
+              {missingDependencies.length > 0 ? (
+                <p className="shrink-0 border-b border-amber-500/20 bg-amber-500/10 px-4 py-2 text-xs text-amber-200">
+                  Undeclared: {missingDependencies.join(", ")} — add in Step 2 or fix expression.
+                </p>
+              ) : null}
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <FormulaStudio
+                  key={derived.id}
+                  targetLabel={derived.displayName}
+                  targetAlias={derived.slug}
+                  targetUnitCode={derived.unitCode}
+                  initialExpression={currentFormula?.rawExpression}
+                  governanceStatus={currentFormula?.status ?? null}
+                  governanceVersion={currentFormula?.version ?? null}
+                  governanceUpdatedAt={currentFormula?.updatedAt ?? null}
+                  governanceReason={currentFormula?.validationStatusReason ?? null}
+                  onSaveDraft={
+                    readOnly
+                      ? undefined
+                      : async (expression) => {
+                          await saveDraftMutation.mutateAsync(expression);
+                        }
+                  }
+                  onSubmitForReview={
+                    readOnly
+                      ? undefined
+                      : async () => {
+                          await submitReviewMutation.mutateAsync();
+                        }
+                  }
+                  isSavingDraft={saveDraftMutation.isPending}
+                  isSubmittingReview={submitReviewMutation.isPending}
+                  canSubmitForReview={canSubmitForReview}
+                  onParseUpdate={handleParseUpdate}
+                  variablePool={variablePool}
+                  formulaParameters={formulaParameters}
+                />
+              </div>
+            </div>
+          ) : null}
+
+          {derived && flowStep === "review" ? (
+            <div className="mx-auto max-w-2xl space-y-6">
+              <div>
+                <h3 className="text-sm font-semibold text-[#f4f4f5]">Step 4 — Review &amp; publish</h3>
+                <p className="mt-1 text-xs text-[#71717a]">
+                  Submit for review when the formula validates in Studio.
+                </p>
+              </div>
               {currentFormula && latestVersion ? (
-                <section className="rounded-lg border border-white/10 bg-[#0f0f11] p-3 text-xs text-zinc-400">
-                  <p className="font-medium text-zinc-200">Latest review</p>
+                <section className="rounded-lg border border-white/10 bg-[#0f0f11] p-4 text-xs text-zinc-400">
+                  <p className="font-medium text-zinc-200">Governance</p>
                   <p className="mt-1">
-                    {versionQuery.data?.length ?? 0} version(s) ·{" "}
-                    {versionQuery.data?.[0]?.reviewDecision?.decision ?? "pending"}
+                    Status <span className="text-zinc-200">{currentFormula.status}</span> ·{" "}
+                    Runtime{" "}
+                    <span className="text-zinc-200">
+                      {currentFormula.runtimeReady ? "ready" : "not ready"}
+                    </span>
                   </p>
                   {canReviewDecision && !readOnly ? (
-                    <div className="mt-3 space-y-2">
+                    <div className="mt-4 space-y-2">
                       <Textarea
                         value={decisionNote}
                         onChange={(event) => setDecisionNote(event.target.value)}
@@ -489,12 +508,14 @@ export function DerivedFactorWorkspaceDialog({
                     </div>
                   ) : null}
                 </section>
-              ) : null}
+              ) : (
+                <p className="text-xs text-[#71717a]">Save a formula draft in Studio first.</p>
+              )}
             </div>
           ) : null}
         </div>
 
-        <DialogFooter className="border-t border-white/[0.06] px-5 py-4">
+        <DialogFooter className="shrink-0 border-t border-white/[0.06] px-5 py-4">
           <div className="flex w-full flex-wrap items-center justify-between gap-2">
             <div>
               {!readOnly ? (
@@ -512,7 +533,48 @@ export function DerivedFactorWorkspaceDialog({
               ) : null}
             </div>
             <div className="flex gap-2">
-              {activeTab === "details" && !readOnly ? (
+              {flowStep !== "basics" ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="border-white/10 text-zinc-300"
+                  onClick={() => {
+                    const order: FormulaWorkspaceStep[] = [
+                      "basics",
+                      "parameters",
+                      "studio",
+                      "review",
+                    ];
+                    const idx = order.indexOf(flowStep);
+                    if (idx > 0) {
+                      setFlowStep(order[idx - 1]!);
+                    }
+                  }}
+                >
+                  Back
+                </Button>
+              ) : null}
+              {flowStep !== "review" ? (
+                <Button
+                  type="button"
+                  className="bg-cyan-600/90 text-white hover:bg-cyan-600"
+                  onClick={() => {
+                    const order: FormulaWorkspaceStep[] = [
+                      "basics",
+                      "parameters",
+                      "studio",
+                      "review",
+                    ];
+                    const idx = order.indexOf(flowStep);
+                    if (idx < order.length - 1) {
+                      setFlowStep(order[idx + 1]!);
+                    }
+                  }}
+                >
+                  Next
+                </Button>
+              ) : null}
+              {flowStep === "basics" && !readOnly ? (
                 <LoadingButton
                   type="submit"
                   form={DETAILS_FORM_ID}

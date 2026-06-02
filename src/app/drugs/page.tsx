@@ -121,7 +121,9 @@ export default function DrugsPage() {
       {showSkeleton ? <FactorTableSkeleton /> : null}
 
       {data && !error ? (
+        <div className="flex min-h-0 flex-1 flex-col">
         <RegistryListCard
+          className="min-h-0 flex-1"
           total={data.pagination.total}
           isFetching={isFetching}
           isLoading={isLoading}
@@ -167,6 +169,7 @@ export default function DrugsPage() {
             />
           ) : null}
         </RegistryListCard>
+        </div>
       ) : null}
     </RegistryListShell>
   );

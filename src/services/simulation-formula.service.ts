@@ -5,6 +5,20 @@ export type SimulationKnownVariable = {
   instanceId: string;
 };
 
+export type SimulationKnownParameter = {
+  alias: string;
+  type: "DYNAMIC" | "STATIC";
+  instanceId?: string;
+  defaultValue?: number;
+};
+
+export type SimulationDependencySummary = {
+  usedDynamic: string[];
+  usedStatic: string[];
+  undeclared: string[];
+  unusedDeclared: string[];
+};
+
 export type SimulationValidationError = {
   type: string;
   message: string;
@@ -31,24 +45,10 @@ export type SimulationNormalizeResponse = {
 
 export type SimulationParseResponse = {
   status: "VALID" | "BROKEN";
-  frameworkVersion?: string | null;
   dependencies?: SimulationKnownVariable[];
+  dependencySummary?: SimulationDependencySummary;
   errors?: SimulationValidationError[];
 };
-
-export type SimulationFrameworkMetadata = {
-  framework: string;
-  defaultVersion: string;
-  supportedVersions: string[];
-  capabilities: {
-    supportsFunctions: boolean;
-    supportsPower: boolean;
-    supportsDivision: boolean;
-    supportsDifferential: boolean;
-  };
-};
-
-type EditorMode = "monaco" | "mathlive";
 
 function simulationBaseUrl(): string {
   return env.NEXT_PUBLIC_SIMULATION_URL.replace(/\/$/, "");
@@ -57,7 +57,7 @@ function simulationBaseUrl(): string {
 export async function normalizeFormulaPreview(input: {
   expression: string;
   knownAliases?: string[];
-  editorMode?: EditorMode;
+  knownParameters?: SimulationKnownParameter[];
 }): Promise<SimulationNormalizeResponse> {
   const response = await fetch(`${simulationBaseUrl()}/api/v1/formula/normalize`, {
     method: "POST",
@@ -73,29 +73,20 @@ export async function normalizeFormulaPreview(input: {
 }
 
 export async function parseFormulaPreview(input: {
-  framework?: string | null;
   expression: string;
-  knownVariables: SimulationKnownVariable[];
-  frameworkVersion?: string;
+  knownVariables?: SimulationKnownVariable[];
+  knownParameters?: SimulationKnownParameter[];
   manualMode?: boolean;
 }): Promise<SimulationParseResponse> {
-  const body: Record<string, unknown> = {
-    expression: input.expression,
-    knownVariables: input.knownVariables,
-    manualMode: input.manualMode ?? false,
-  };
-
-  if (input.framework) {
-    body.framework = input.framework;
-    if (input.frameworkVersion) {
-      body.frameworkVersion = input.frameworkVersion;
-    }
-  }
-
   const response = await fetch(`${simulationBaseUrl()}/api/v1/formula/parse`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      expression: input.expression,
+      knownVariables: input.knownVariables ?? [],
+      knownParameters: input.knownParameters ?? [],
+      manualMode: input.manualMode ?? false,
+    }),
   });
 
   if (!response.ok) {
@@ -103,14 +94,4 @@ export async function parseFormulaPreview(input: {
   }
 
   return (await response.json()) as SimulationParseResponse;
-}
-
-export async function listSimulationFrameworks(): Promise<
-  SimulationFrameworkMetadata[]
-> {
-  const response = await fetch(`${simulationBaseUrl()}/api/v1/frameworks`);
-  if (!response.ok) {
-    throw new Error(`Framework list failed (HTTP ${response.status})`);
-  }
-  return (await response.json()) as SimulationFrameworkMetadata[];
 }

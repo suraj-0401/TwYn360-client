@@ -20,6 +20,7 @@ export function RegistryListShell({
   return (
     <PlatformShell
       domainId="registry"
+      contentFill
       breadcrumbs={breadcrumbs}
       contextLine={contextLine}
       topbarActions={topbarActions}

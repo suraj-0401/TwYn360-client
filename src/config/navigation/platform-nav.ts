@@ -52,10 +52,10 @@ export const PLATFORM_DOMAINS: PlatformDomain[] = [
       {
         id: "home",
         label: "Control center",
-        href: "/",
+        href: "/home",
         icon: Home,
         status: "active",
-        matchPrefix: "/",
+        matchPrefix: "/home",
       },
     ],
   },
@@ -267,7 +267,7 @@ export function resolveActiveDomain(pathname: string): PlatformDomainId {
   ) {
     return "registry";
   }
-  if (pathname === "/") {
+  if (pathname === "/" || pathname.startsWith("/home")) {
     return "platform";
   }
   return "registry";

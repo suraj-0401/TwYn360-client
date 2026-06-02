@@ -1,0 +1,85 @@
+"use client";
+
+import { cn } from "@/lib/utils";
+import { Check } from "lucide-react";
+
+export type FormulaWorkspaceStep = "basics" | "parameters" | "studio" | "review";
+
+const STEPS: Array<{ id: FormulaWorkspaceStep; label: string }> = [
+  { id: "basics", label: "Basics" },
+  { id: "parameters", label: "Parameters" },
+  { id: "studio", label: "Formula Studio" },
+  { id: "review", label: "Review" },
+];
+
+type FormulaWorkspaceStepperProps = {
+  active: FormulaWorkspaceStep;
+  onStepClick?: (step: FormulaWorkspaceStep) => void;
+  completedThrough?: FormulaWorkspaceStep;
+};
+
+const STEP_ORDER: FormulaWorkspaceStep[] = ["basics", "parameters", "studio", "review"];
+
+function stepIndex(step: FormulaWorkspaceStep): number {
+  return STEP_ORDER.indexOf(step);
+}
+
+export function FormulaWorkspaceStepper({
+  active,
+  onStepClick,
+  completedThrough,
+}: FormulaWorkspaceStepperProps) {
+  const completedIdx = completedThrough ? stepIndex(completedThrough) : -1;
+  const activeIdx = stepIndex(active);
+
+  return (
+    <nav
+      aria-label="Formula authoring steps"
+      className="flex flex-wrap items-center gap-1 border-b border-white/[0.06] pb-3"
+    >
+      {STEPS.map((step, index) => {
+        const idx = stepIndex(step.id);
+        const isActive = step.id === active;
+        const isComplete = idx < activeIdx || idx <= completedIdx;
+        const clickable = onStepClick && idx <= Math.max(activeIdx, completedIdx + 1);
+
+        return (
+          <div key={step.id} className="flex items-center gap-1">
+            {index > 0 ? (
+              <span className="mx-1 hidden text-[#3f3f46] sm:inline">→</span>
+            ) : null}
+            <button
+              type="button"
+              disabled={!clickable}
+              onClick={() => clickable && onStepClick?.(step.id)}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
+                isActive
+                  ? "bg-cyan-500/15 text-cyan-100 ring-1 ring-cyan-500/30"
+                  : isComplete
+                    ? "text-emerald-200/90 hover:bg-white/[0.04]"
+                    : "text-[#71717a]",
+                clickable && !isActive && "hover:bg-white/[0.04] hover:text-[#d4d4d8]",
+                !clickable && "cursor-default",
+              )}
+            >
+              <span
+                className={cn(
+                  "flex size-5 items-center justify-center rounded-full text-[10px]",
+                  isActive
+                    ? "bg-cyan-500/25 text-cyan-100"
+                    : isComplete
+                      ? "bg-emerald-500/20 text-emerald-200"
+                      : "bg-white/[0.06] text-[#71717a]",
+                )}
+              >
+                {isComplete && !isActive ? <Check className="size-3" /> : index + 1}
+              </span>
+              {step.label}
+            </button>
+          </div>
+        );
+      })}
+    </nav>
+  );
+}

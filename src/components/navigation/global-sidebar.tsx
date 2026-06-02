@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { SignOutButton } from "@/components/auth/sign-out-button";
 import { PLATFORM_DOMAINS, type PlatformDomainId } from "@/config/navigation";
+import { PLATFORM_PERSONA } from "@/config/persona";
 import { Button } from "@/components/ui/button";
 
 type GlobalSidebarProps = {
@@ -28,12 +30,12 @@ export function GlobalSidebar({
     >
       <div className="flex h-12 items-center justify-center border-b border-white/[0.06]">
         <Link
-          href="/"
+          href="/home"
           className={cn(
             "flex size-8 items-center justify-center rounded-md text-xs font-bold tracking-tight text-[#f4f4f5]",
             "bg-gradient-to-br from-cyan-500/20 to-violet-500/20 ring-1 ring-white/10",
           )}
-          title="DFF Platform"
+          title="DFF Platform Admin"
         >
           DFF
         </Link>
@@ -76,7 +78,11 @@ export function GlobalSidebar({
         })}
       </nav>
 
-      <div className="border-t border-white/[0.06] p-1.5">
+      <div className="border-t border-white/[0.06] p-1.5 space-y-1">
+        <SignOutButton
+          persona={PLATFORM_PERSONA.ADMIN}
+          className="h-8 w-full justify-center px-0 text-[#71717a] hover:text-[#f4f4f5]"
+        />
         <Button
           type="button"
           variant="ghost"

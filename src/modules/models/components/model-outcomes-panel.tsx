@@ -20,6 +20,9 @@ import { usePrefetchWorkspace } from "@/renderer/hooks/use-prefetch-workspace";
 import { getFormulaByTarget } from "@/services/formula.service";
 import { useOutcomeMutations, useOutcomes } from "../hooks/use-outcomes";
 import { useModelFactorInstances } from "../hooks/use-model-factor-instances";
+import { useDerivedFactors } from "../hooks/use-derived-factors";
+import { FormulaGovernanceBadge } from "./formula-governance-badge";
+import { buildFormulaVariablePool } from "../utils/formula-variable-pool";
 import { CreateOutcomeDialog } from "./create-outcome-dialog";
 import { OutcomeWorkspaceDialog } from "./outcome-workspace-dialog";
 import type { OutcomeDefinitionDto } from "@/types/formula";
@@ -37,18 +40,6 @@ function formatCell(value: unknown): string {
   return String(value);
 }
 
-function resolveFormulaStatus(payload: unknown): string | null {
-  if (!payload || typeof payload !== "object") {
-    return null;
-  }
-  const direct = payload as { status?: string };
-  if (typeof direct.status === "string") {
-    return direct.status;
-  }
-  const wrapped = (payload as { data?: { status?: string } }).data;
-  return typeof wrapped?.status === "string" ? wrapped.status : null;
-}
-
 export function ModelOutcomesPanel({
   modelId,
   readOnly = false,
@@ -61,6 +52,7 @@ export function ModelOutcomesPanel({
   const outcomesQuery = useOutcomes(modelId);
   const { createMutation, deleteMutation } = useOutcomeMutations(modelId);
   const { data: factorInstances } = useModelFactorInstances(modelId);
+  const derivedFactorsQuery = useDerivedFactors(modelId);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
@@ -71,12 +63,11 @@ export function ModelOutcomesPanel({
 
   const variablePool = useMemo(
     () =>
-      (factorInstances ?? []).map((item) => ({
-        alias: item.factor.slug,
-        label: item.resolved.displayName,
-        instanceId: item.id,
-      })),
-    [factorInstances],
+      buildFormulaVariablePool({
+        factorInstances: factorInstances ?? [],
+        derivedFactors: derivedFactorsQuery.data ?? [],
+      }),
+    [factorInstances, derivedFactorsQuery.data],
   );
 
   const formulaStatusQueries = useQueries({
@@ -88,10 +79,10 @@ export function ModelOutcomesPanel({
     })),
   });
 
-  const formulaStatusById = useMemo(() => {
-    const map = new Map<string, string | null>();
+  const formulaPayloadById = useMemo(() => {
+    const map = new Map<string, unknown>();
     items.forEach((item, index) => {
-      map.set(item.id, resolveFormulaStatus(formulaStatusQueries[index]?.data));
+      map.set(item.id, formulaStatusQueries[index]?.data);
     });
     return map;
   }, [items, formulaStatusQueries]);
@@ -164,15 +155,9 @@ export function ModelOutcomesPanel({
       {
         id: "formula",
         header: "Formula",
-        cell: (row) => {
-          const formulaStatus = formulaStatusById.get(row.id);
-          if (!formulaStatus) {
-            return (
-              <span className="text-xs text-zinc-500">No formula</span>
-            );
-          }
-          return <StatusBadge status={formulaStatus} />;
-        },
+        cell: (row) => (
+          <FormulaGovernanceBadge payload={formulaPayloadById.get(row.id)} />
+        ),
       },
       {
         id: "actions",
@@ -238,7 +223,7 @@ export function ModelOutcomesPanel({
       },
     ];
     return cols;
-  }, [isWorkspace, readOnly, formulaStatusById, deleteMutation.isPending, canEdit]);
+  }, [isWorkspace, readOnly, formulaPayloadById, deleteMutation.isPending, canEdit]);
 
   const createButton = canEdit ? (
     <Button

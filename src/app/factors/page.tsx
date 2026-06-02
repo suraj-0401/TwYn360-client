@@ -177,7 +177,9 @@ export default function FactorsPage() {
       {showInitialSkeleton ? <FactorTableSkeleton /> : null}
 
       {data && !error ? (
+        <div className="flex min-h-0 flex-1 flex-col">
         <RegistryListCard
+          className="min-h-0 flex-1"
           total={data.pagination.total}
           isFetching={isFetching}
           isLoading={isLoading}
@@ -205,7 +207,7 @@ export default function FactorsPage() {
             ) : undefined
           }
           pagination={
-            data.items.length > 0
+            data.pagination.total > 0
               ? {
                   meta: data.pagination,
                   page,
@@ -224,6 +226,7 @@ export default function FactorsPage() {
             />
           ) : null}
         </RegistryListCard>
+        </div>
       ) : null}
     </RegistryListShell>
   );

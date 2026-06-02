@@ -1,13 +1,18 @@
 import { apiClient } from "@/lib/axios";
 import type { ApiSuccessResponse } from "@/types/api";
-import type { FormulaDto, FormulaTargetType, FormulaVersionDto } from "@/types/formula";
+import type {
+  FormulaDto,
+  FormulaParameterInput,
+  FormulaTargetType,
+  FormulaVersionDto,
+} from "@/types/formula";
 
 type CreateFormulaPayload = {
   modelId: string;
   formulaType: string;
-  framework?: string;
   rawExpression: string;
   aliasMap?: Record<string, string>;
+  formulaParameters?: FormulaParameterInput[];
   manualMode?: boolean;
   targetType?: FormulaTargetType;
   targetId?: string;
@@ -19,8 +24,8 @@ type CreateFormulaPayload = {
 type UpdateFormulaPayload = {
   rawExpression?: string;
   aliasMap?: Record<string, string>;
+  formulaParameters?: FormulaParameterInput[];
   manualMode?: boolean;
-  framework?: string | null;
   expectedVersion?: number;
 };
 

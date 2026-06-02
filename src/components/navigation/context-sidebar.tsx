@@ -18,8 +18,8 @@ function isItemActive(pathname: string, matchPrefix?: string): boolean {
   if (!matchPrefix) {
     return false;
   }
-  if (matchPrefix === "/") {
-    return pathname === "/";
+  if (matchPrefix === "/home") {
+    return pathname === "/home";
   }
   return pathname === matchPrefix || pathname.startsWith(`${matchPrefix}/`);
 }

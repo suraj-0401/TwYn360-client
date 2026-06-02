@@ -8,6 +8,7 @@ import {
   resolveActiveDomain,
   type PlatformDomainId,
 } from "@/config/navigation";
+import { AdminSessionGate } from "@/components/auth/admin-session-gate";
 import { GlobalSidebar } from "@/components/navigation/global-sidebar";
 import { ContextSidebar } from "@/components/navigation/context-sidebar";
 import { PlatformTopbar } from "@/components/layout/platform-topbar";
@@ -20,6 +21,8 @@ export type PlatformShellProps = {
   topbarActions?: React.ReactNode;
   /** Override auto-detected domain */
   domainId?: PlatformDomainId;
+  /** Pin list footer (pagination) inside viewport — registry tables */
+  contentFill?: boolean;
 };
 
 export function PlatformShell({
@@ -28,6 +31,7 @@ export function PlatformShell({
   contextLine,
   topbarActions,
   domainId: domainIdProp,
+  contentFill = false,
 }: PlatformShellProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -44,7 +48,7 @@ export function PlatformShell({
       setDomainOverride(domainId);
       const first =
         domainId === "platform"
-          ? "/"
+          ? "/home"
           : domainId === "workspace"
             ? "/models"
             : "/factors";
@@ -62,6 +66,7 @@ export function PlatformShell({
   }
 
   return (
+    <AdminSessionGate>
     <div className={cn("flex h-screen overflow-hidden bg-[#09090b] text-[#f4f4f5]")}>
       <GlobalSidebar
         activeDomain={activeDomain}
@@ -79,11 +84,16 @@ export function PlatformShell({
         ) : null}
         <div className="flex min-h-0 min-w-0 flex-1">
           <ContextSidebar domainId={activeDomain} collapsed={collapsed} />
-          <WorkspaceContainer className="min-w-0 flex-1">
-            {children}
+          <WorkspaceContainer className="min-w-0 flex-1" fill={contentFill}>
+            {contentFill ? (
+              <div className="flex min-h-0 flex-1 flex-col gap-4">{children}</div>
+            ) : (
+              children
+            )}
           </WorkspaceContainer>
         </div>
       </div>
     </div>
+    </AdminSessionGate>
   );
 }
