@@ -53,6 +53,12 @@ const STATUS_FALLBACK_MESSAGE: Record<number, string> = {
   503: "The API is temporarily unavailable.",
 };
 
+/** Server error codes with clearer copy than generic HTTP fallbacks. */
+const API_CODE_MESSAGES: Record<string, string> = {
+  DATABASE_SCHEMA_NOT_READY:
+    "Registry storage isn't set up yet. An administrator needs to run database migrations for this environment.",
+};
+
 function isAxiosError(error: unknown): error is AxiosError<ApiErrorResponse> {
   return (
     typeof error === "object" &&
@@ -60,6 +66,10 @@ function isAxiosError(error: unknown): error is AxiosError<ApiErrorResponse> {
     "isAxiosError" in error &&
     (error as AxiosError).isAxiosError === true
   );
+}
+
+function capitalizeResource(resource: string): string {
+  return resource.charAt(0).toUpperCase() + resource.slice(1);
 }
 
 function defaultTitle(status?: number, resource?: string): string {
@@ -96,9 +106,26 @@ export function formatApiError(
     const title = defaultTitle(status, context?.resource);
 
     if (api?.message) {
+      const message =
+        (api.code && API_CODE_MESSAGES[api.code]) || api.message;
+      const schemaTitle =
+        api.code === "DATABASE_SCHEMA_NOT_READY"
+          ? context?.resource
+            ? `${capitalizeResource(context.resource)} unavailable`
+            : "Setup required"
+          : title;
+      return {
+        title: schemaTitle,
+        message,
+        status,
+        code: api.code,
+      };
+    }
+
+    if (api?.code && API_CODE_MESSAGES[api.code]) {
       return {
         title,
-        message: api.message,
+        message: API_CODE_MESSAGES[api.code],
         status,
         code: api.code,
       };
@@ -198,7 +225,11 @@ export function handleGlobalApiError(error: unknown): void {
   }
 
   if (status && status >= 500) {
-    toast.error(formatted.title, formatted.message);
+    const toastTitle =
+      formatted.code === "DATABASE_SCHEMA_NOT_READY"
+        ? "Setup required"
+        : formatted.title;
+    toast.error(toastTitle, formatted.message);
     return;
   }
 
