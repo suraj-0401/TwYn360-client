@@ -1,17 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { ClinicalShell } from "@/components/layout/clinical-shell";
 import { ClinicalIntakeForm } from "@/modules/clinical/components/clinical-intake-form";
 import { ClinicalTestValuesPanel } from "@/modules/clinical/components/clinical-test-values-panel";
 import { AssessmentContextSidebar } from "@/modules/clinical/components/workspace/assessment-context-sidebar";
 import { ClinicalWorkspaceLayout } from "@/modules/clinical/components/workspace/clinical-workspace-layout";
-import { RuntimeStatusBar } from "@/modules/clinical/components/workspace/runtime-status-bar";
 import { StickyInsightsPanel } from "@/modules/clinical/components/workspace/sticky-insights-panel";
 import { useClinicalAssessmentSession } from "@/modules/clinical/hooks/use-clinical-assessment-session";
 import { useClinicalLiveExecute } from "@/modules/clinical/hooks/use-clinical-live-execute";
-import { formatRelativeTime } from "@/modules/clinical/utils/format-relative-time";
 import type { ClinicalIntakeSchema } from "@/types/clinical-intake";
 
 type ClinicalAssessmentWorkspaceProps = {
@@ -53,7 +51,6 @@ export function ClinicalAssessmentWorkspace({
 
   const [values, setValues] = useState(() => defaultValuesFromSchema(schema));
   const [subjectLabel, setSubjectLabel] = useState("");
-  const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
     if (!assessment) {
@@ -72,43 +69,18 @@ export function ClinicalAssessmentWorkspace({
     result: executionResult,
     executeState,
     executeError,
-    missingLabels,
-    lastUpdatedAt,
+    hasAttemptedSubmit,
+    canSubmit,
+    submit,
   } = useClinicalLiveExecute({
     modelId,
     inputs: schema.inputs,
     values,
     enabled: executeEnabled,
-    initialResult: assessment?.lastResult ?? null,
     onResult: (result) => {
       void persistLastResult(result);
     },
   });
-
-  useEffect(() => {
-    if (!lastUpdatedAt) {
-      return;
-    }
-    const timer = window.setInterval(() => setNowMs(Date.now()), 10_000);
-    return () => window.clearInterval(timer);
-  }, [lastUpdatedAt]);
-
-  const runtimeInputCount = useMemo(
-    () => schema.inputs.filter((row) => row.runtimeRequired).length,
-    [schema.inputs],
-  );
-
-  const filledRequiredCount = Math.max(
-    0,
-    runtimeInputCount - missingLabels.length,
-  );
-
-  const lastUpdatedLabel = useMemo(() => {
-    if (!lastUpdatedAt) {
-      return null;
-    }
-    return formatRelativeTime(lastUpdatedAt, nowMs);
-  }, [lastUpdatedAt, nowMs]);
 
   const persistSnapshot = (next: {
     inputs: Record<string, unknown>;
@@ -198,16 +170,7 @@ export function ClinicalAssessmentWorkspace({
         }
         main={
           <>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <RuntimeStatusBar
-                filledRequiredCount={filledRequiredCount}
-                requiredCount={runtimeInputCount}
-                executeState={executeState}
-                saveState={saveState}
-                missingCount={missingLabels.length}
-                lastUpdatedLabel={lastUpdatedLabel}
-                isLocalPreview={isLocalPreview}
-              />
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <ClinicalTestValuesPanel
                 modelSlug={schema.model.slug}
                 inputs={schema.inputs}
@@ -231,6 +194,10 @@ export function ClinicalAssessmentWorkspace({
             result={executionResult}
             executeState={executeState}
             executeError={executeError}
+            hasAttemptedSubmit={hasAttemptedSubmit}
+            canSubmit={canSubmit}
+            isReadOnly={isReadOnly}
+            onSubmit={() => void submit()}
           />
         }
       />

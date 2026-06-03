@@ -3,13 +3,19 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useQueries } from "@tanstack/react-query";
-import { Eye, Pencil, Plus, Settings2, Trash2 } from "lucide-react";
+import {
+  Calculator,
+  Eye,
+  ListTree,
+  Plus,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
 import {
   DataTable,
   type DataTableColumn,
 } from "@/components/data-table/data-table";
 import { PlatformDataTable } from "@/components/data-table/platform-data-table";
-import { StatusBadge } from "@/components/data-table/status-badge";
 import { useConfirm } from "@/components/feedback";
 import { FactorTableSkeleton, QueryErrorState } from "@/components/feedback";
 import { Button } from "@/components/ui/button";
@@ -20,30 +26,33 @@ import { usePrefetchWorkspace } from "@/renderer/hooks/use-prefetch-workspace";
 import { getFormulaByTarget } from "@/services/formula.service";
 import { useDerivedFactorMutations, useDerivedFactors } from "../hooks/use-derived-factors";
 import { useModelFactorInstances } from "../hooks/use-model-factor-instances";
-import { FormulaGovernanceBadge } from "./formula-governance-badge";
-import { buildFormulaVariablePool } from "../utils/formula-variable-pool";
-import { CreateDerivedFactorDialog } from "./create-derived-factor-dialog";
+import {
+  buildFormulaVariablePool,
+  slugToFormulaAlias,
+} from "../utils/formula-variable-pool";
+import { isFormulaDerivedFactor } from "../utils/derived-factor-segments";
+import { toDisplayFormulaExpression } from "../utils/formula-expression";
+import { resolveFormulaPayload } from "../utils/resolve-formula-payload";
+import {
+  CreateDerivedFactorDialog,
+  type DerivedFactorCreateKind,
+} from "./create-derived-factor-dialog";
 import { DerivedFactorWorkspaceDialog } from "./derived-factor-workspace-dialog";
+import { FormulaGovernanceBadge } from "./formula-governance-badge";
 import type { DerivedFactorDefinitionDto } from "@/types/formula";
+import type { FormulaWorkspaceStep } from "./formula-workspace-stepper";
 
-type ModelDerivedFactorsPanelProps = {
+type ModelFormulaFactorsPanelProps = {
   modelId: string;
   readOnly?: boolean;
   layout?: "default" | "workspace";
 };
 
-function formatCell(value: unknown): string {
-  if (value === null || value === undefined || value === "") {
-    return "—";
-  }
-  return String(value);
-}
-
-export function ModelDerivedFactorsPanel({
+export function ModelFormulaFactorsPanel({
   modelId,
   readOnly = false,
   layout = "workspace",
-}: ModelDerivedFactorsPanelProps) {
+}: ModelFormulaFactorsPanelProps) {
   const { confirm } = useConfirm();
   const adminKey = env.NEXT_PUBLIC_ADMIN_API_KEY;
   const isWorkspace = layout === "workspace";
@@ -55,25 +64,28 @@ export function ModelDerivedFactorsPanel({
   const [createOpen, setCreateOpen] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [workspaceFactorId, setWorkspaceFactorId] = useState<string | null>(null);
-  const [workspaceInitialTab, setWorkspaceInitialTab] = useState<"details" | "formula">("details");
+  const [workspaceFlowStep, setWorkspaceFlowStep] = useState<
+    FormulaWorkspaceStep | undefined
+  >(undefined);
 
-  const items = derivedQuery.data ?? [];
+  const allItems = derivedQuery.data ?? [];
+  const items = useMemo(() => allItems.filter(isFormulaDerivedFactor), [allItems]);
 
   const variablePool = useMemo(
     () =>
       buildFormulaVariablePool({
         factorInstances: factorInstances ?? [],
-        derivedFactors: items,
+        derivedFactors: allItems,
         excludeDerivedFactorId: workspaceFactorId,
+        preferredMappingDerivedFactorId: workspaceFactorId,
       }),
-    [factorInstances, items, workspaceFactorId],
+    [factorInstances, allItems, workspaceFactorId],
   );
 
   const formulaStatusQueries = useQueries({
     queries: items.map((item) => ({
       queryKey: ["formula-by-target", modelId, "derived_factor", item.id],
-      queryFn: async () =>
-        (await getFormulaByTarget(modelId, "derived_factor", item.id)).data,
+      queryFn: async () => getFormulaByTarget(modelId, "derived_factor", item.id),
       staleTime: 30_000,
     })),
   });
@@ -90,10 +102,10 @@ export function ModelDerivedFactorsPanel({
 
   function openWorkspace(
     factorId: string,
-    tab: "details" | "formula" = "details",
+    flowStep: FormulaWorkspaceStep = "studio",
   ) {
     setWorkspaceFactorId(factorId);
-    setWorkspaceInitialTab(tab);
+    setWorkspaceFlowStep(flowStep);
     setWorkspaceOpen(true);
   }
 
@@ -104,7 +116,7 @@ export function ModelDerivedFactorsPanel({
     const ok = await confirm({
       title: `Delete “${row.displayName}”?`,
       description:
-        "Removes this derived factor and its formula. This cannot be undone.",
+        "Removes this derived factor and its expression. This cannot be undone.",
       confirmLabel: "Delete",
       variant: "destructive",
     });
@@ -115,7 +127,7 @@ export function ModelDerivedFactorsPanel({
   }
 
   const columns = useMemo((): DataTableColumn<DerivedFactorDefinitionDto>[] => {
-    const cols: DataTableColumn<DerivedFactorDefinitionDto>[] = [
+    return [
       {
         id: "factor",
         header: "Derived factor",
@@ -141,19 +153,36 @@ export function ModelDerivedFactorsPanel({
         ),
       },
       {
-        id: "unit",
-        header: "Unit",
-        className: isWorkspace ? "text-[#71717a]" : "text-muted-foreground",
-        cell: (row) => formatCell(row.unitCode),
+        id: "expression",
+        header: "Expression",
+        cell: (row) => {
+          const formula = resolveFormulaPayload(formulaPayloadById.get(row.id));
+          const targetAlias = slugToFormulaAlias(row.slug);
+          if (!formula?.rawExpression?.trim()) {
+            return (
+              <span className="text-xs text-zinc-500">No expression yet</span>
+            );
+          }
+          const display = toDisplayFormulaExpression(
+            formula.rawExpression,
+            targetAlias,
+          );
+          return (
+            <code
+              className={cn(
+                "block max-w-[280px] truncate font-mono text-xs",
+                isWorkspace ? "text-[#a1a1aa]" : "text-muted-foreground",
+              )}
+              title={display}
+            >
+              {targetAlias} = {display}
+            </code>
+          );
+        },
       },
       {
         id: "status",
-        header: "Definition",
-        cell: (row) => <StatusBadge status={row.statusCode} />,
-      },
-      {
-        id: "formula",
-        header: "Formula",
+        header: "Status",
         cell: (row) => (
           <FormulaGovernanceBadge payload={formulaPayloadById.get(row.id)} />
         ),
@@ -171,20 +200,16 @@ export function ModelDerivedFactorsPanel({
               className={cn(
                 "h-8 gap-1",
                 isWorkspace
-                  ? "text-[#a1a1aa] hover:bg-white/[0.04] hover:text-[#f4f4f5]"
+                  ? "text-[#a1a1aa] hover:bg-white/[0.04] hover:text-cyan-200"
                   : undefined,
               )}
               onClick={(event) => {
                 event.stopPropagation();
-                openWorkspace(row.id, "details");
+                openWorkspace(row.id, "studio");
               }}
             >
-              {readOnly ? (
-                <Eye className="size-3.5" aria-hidden />
-              ) : (
-                <Settings2 className="size-3.5" aria-hidden />
-              )}
-              {readOnly ? "View" : "Manage"}
+              <Calculator className="size-3.5" aria-hidden />
+              {readOnly ? "View studio" : "Formula studio"}
             </Button>
             {!readOnly ? (
               <>
@@ -192,14 +217,27 @@ export function ModelDerivedFactorsPanel({
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="h-8 gap-1 text-[#a1a1aa] hover:bg-white/[0.04] hover:text-cyan-200"
+                  className="h-8 gap-1 text-[#a1a1aa] hover:bg-white/[0.04] hover:text-[#f4f4f5]"
                   onClick={(event) => {
                     event.stopPropagation();
-                    openWorkspace(row.id, "formula");
+                    openWorkspace(row.id, "parameters");
                   }}
                 >
-                  <Pencil className="size-3.5" aria-hidden />
-                  Formula
+                  <ListTree className="size-3.5" aria-hidden />
+                  Manage params
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 gap-1 text-[#a1a1aa] hover:bg-white/[0.04] hover:text-emerald-200"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    openWorkspace(row.id, "studio");
+                  }}
+                >
+                  <ShieldCheck className="size-3.5" aria-hidden />
+                  Validate
                 </Button>
                 <Button
                   type="button"
@@ -216,12 +254,25 @@ export function ModelDerivedFactorsPanel({
                   Delete
                 </Button>
               </>
-            ) : null}
+            ) : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 gap-1"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openWorkspace(row.id, "basics");
+                }}
+              >
+                <Eye className="size-3.5" aria-hidden />
+                View
+              </Button>
+            )}
           </div>
         ),
       },
     ];
-    return cols;
   }, [isWorkspace, readOnly, formulaPayloadById, deleteMutation.isPending, canEdit]);
 
   const createButton = canEdit ? (
@@ -241,7 +292,7 @@ export function ModelDerivedFactorsPanel({
     </Button>
   ) : null;
 
-  const emptyMessage = canEdit ? (
+  const emptyMessage = (
     <div
       className={cn(
         "rounded-xl border border-dashed px-6 py-10 text-center",
@@ -250,45 +301,44 @@ export function ModelDerivedFactorsPanel({
           : "border-border bg-muted/20 text-muted-foreground",
       )}
     >
-      <p className="text-sm">
-        No derived factors yet. Create one to define a computed value from raw model factors.
+      <p className="text-sm font-medium text-[#a1a1aa]">No derived factors</p>
+      <p className="mt-2 text-sm">
+        No derived factors created yet. Define numeric expressions that use raw factors and
+        transformation outputs.
       </p>
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className={cn(
-          "mt-4 gap-1",
-          isWorkspace &&
-            "border-cyan-500/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20",
-        )}
-        onClick={() => setCreateOpen(true)}
-      >
-        <Plus className="size-3.5" aria-hidden />
-        Create derived factor
-      </Button>
-    </div>
-  ) : (
-    <div
-      className={cn(
-        "rounded-xl border border-dashed px-6 py-10 text-center text-sm",
-        isWorkspace ? "border-white/10 text-[#71717a]" : "text-muted-foreground",
+      {canEdit ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className={cn(
+            "mt-4 gap-1",
+            isWorkspace &&
+              "border-cyan-500/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20",
+          )}
+          onClick={() => setCreateOpen(true)}
+        >
+          <Plus className="size-3.5" aria-hidden />
+          Create derived factor
+        </Button>
+      ) : (
+        <p className="mt-4 text-xs text-amber-400/90">
+          <Link
+            href={`/models/${modelId}/edit`}
+            className="text-cyan-300 underline-offset-2 hover:underline"
+          >
+            Edit the model
+          </Link>{" "}
+          to add derived factors.
+        </p>
       )}
-    >
-      <p>No derived factors on this model.</p>
-      <p className="mt-2 text-xs text-amber-400/90">
-        <Link href={`/models/${modelId}/edit`} className="text-cyan-300 underline-offset-2 hover:underline">
-          Edit the model
-        </Link>{" "}
-        to create derived factors.
-      </p>
     </div>
   );
 
   if (derivedQuery.isLoading) {
     return (
       <div className="space-y-6">
-        <div className="flex justify-between gap-3">{createButton}</div>
+        <div className="flex justify-end">{createButton}</div>
         <FactorTableSkeleton />
       </div>
     );
@@ -321,8 +371,8 @@ export function ModelDerivedFactorsPanel({
               isWorkspace ? "text-[#71717a]" : "text-muted-foreground",
             )}
           >
-            Computed aliases from raw factors ({items.length} total). Manage details, formulas,
-            and lifecycle here.
+            Numeric computations built from parameters and expressions ({items.length}{" "}
+            configured).
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -345,39 +395,43 @@ export function ModelDerivedFactorsPanel({
           columns={columns}
           items={items}
           getRowKey={(row) => row.id}
-          onRowClick={(row) => openWorkspace(row.id, "details")}
+          onRowClick={(row) => openWorkspace(row.id, "studio")}
         />
       ) : (
         <DataTable
           columns={columns}
           items={items}
           getRowKey={(row) => row.id}
-          onRowClick={(row) => openWorkspace(row.id, "details")}
+          onRowClick={(row) => openWorkspace(row.id, "studio")}
         />
       )}
 
       <CreateDerivedFactorDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
+        defaultKind={"formula" satisfies DerivedFactorCreateKind}
         isSubmitting={createMutation.isPending}
         onSubmit={async (payload) => {
           const created = await createMutation.mutateAsync(payload);
           setCreateOpen(false);
-          openWorkspace(created.id, "formula");
+          openWorkspace(created.id, "parameters");
         }}
       />
 
       <DerivedFactorWorkspaceDialog
         open={workspaceOpen}
-        onOpenChange={setWorkspaceOpen}
+        onOpenChange={(next) => {
+          setWorkspaceOpen(next);
+          if (!next) {
+            setWorkspaceFlowStep(undefined);
+          }
+        }}
         modelId={modelId}
         derivedFactorId={workspaceFactorId}
         readOnly={readOnly}
         variablePool={variablePool}
-        initialTab={workspaceInitialTab}
-        onDeleted={() => {
-          setWorkspaceFactorId(null);
-        }}
+        initialFlowStep={workspaceFlowStep}
+        onDeleted={() => setWorkspaceFactorId(null)}
       />
     </div>
   );

@@ -11,6 +11,10 @@ type StickyInsightsPanelProps = {
   result: RuntimeExecutionResult | null;
   executeState: ClinicalExecuteState;
   executeError: string | null;
+  hasAttemptedSubmit?: boolean;
+  canSubmit?: boolean;
+  isReadOnly?: boolean;
+  onSubmit?: () => void;
 };
 
 export function StickyInsightsPanel(props: StickyInsightsPanelProps) {

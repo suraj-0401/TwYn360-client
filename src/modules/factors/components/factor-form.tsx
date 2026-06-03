@@ -16,6 +16,7 @@ import {
   emptyFormValues,
   factorToFormValues,
   resolveDataTypeFieldId,
+  resolveFieldIdByKey,
   resolveUnitFieldId,
   valuesToFactorPayload,
 } from "../utils/factor-workspace-values";
@@ -97,7 +98,14 @@ export function FactorForm({
       const next = { ...prev, [fieldId]: value };
 
       if (dataTypeFieldId && fieldId === dataTypeFieldId) {
-        next.validations = {};
+        const validationsFieldId = resolveFieldIdByKey(fields, "validations");
+        if (validationsFieldId) {
+          next[validationsFieldId] = {};
+        }
+        const allowedValuesFieldId = resolveFieldIdByKey(fields, "allowedValues");
+        if (allowedValuesFieldId) {
+          next[allowedValuesFieldId] = "";
+        }
         if (unitFieldId) {
           next[unitFieldId] = "";
         }

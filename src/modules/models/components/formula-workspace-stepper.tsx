@@ -3,42 +3,61 @@
 import { cn } from "@/lib/utils";
 import { Check } from "lucide-react";
 
-export type FormulaWorkspaceStep = "basics" | "parameters" | "studio" | "review";
+export type FormulaWorkspaceStep =
+  | "basics"
+  | "parameters"
+  | "mapping"
+  | "studio"
+  | "review";
 
-const STEPS: Array<{ id: FormulaWorkspaceStep; label: string }> = [
-  { id: "basics", label: "Basics" },
-  { id: "parameters", label: "Parameters" },
-  { id: "studio", label: "Formula Studio" },
-  { id: "review", label: "Review" },
-];
+export type FormulaWorkspaceStepConfig = {
+  id: FormulaWorkspaceStep;
+  label: string;
+};
 
 type FormulaWorkspaceStepperProps = {
   active: FormulaWorkspaceStep;
   onStepClick?: (step: FormulaWorkspaceStep) => void;
   completedThrough?: FormulaWorkspaceStep;
+  includeMappingStep?: boolean;
+  mappingLabel?: string;
+  /** Override default outcome/formula steps (e.g. transformation-only wizard). */
+  steps?: FormulaWorkspaceStepConfig[];
 };
 
-const STEP_ORDER: FormulaWorkspaceStep[] = ["basics", "parameters", "studio", "review"];
-
-function stepIndex(step: FormulaWorkspaceStep): number {
-  return STEP_ORDER.indexOf(step);
+function resolveSteps(
+  includeMappingStep: boolean,
+  mappingLabel: string,
+): Array<{ id: FormulaWorkspaceStep; label: string }> {
+  return [
+    { id: "basics", label: "Basics" },
+    { id: "parameters", label: "Parameters" },
+    ...(includeMappingStep ? [{ id: "mapping" as const, label: mappingLabel }] : []),
+    { id: "studio", label: "Formula Studio" },
+    { id: "review", label: "Review" },
+  ];
 }
 
 export function FormulaWorkspaceStepper({
   active,
   onStepClick,
   completedThrough,
+  includeMappingStep = false,
+  mappingLabel = "Transformations",
+  steps: stepsOverride,
 }: FormulaWorkspaceStepperProps) {
-  const completedIdx = completedThrough ? stepIndex(completedThrough) : -1;
-  const activeIdx = stepIndex(active);
+  const steps = stepsOverride ?? resolveSteps(includeMappingStep, mappingLabel);
+  const stepOrder = steps.map((step) => step.id);
+  const completedIdx = completedThrough ? stepOrder.indexOf(completedThrough) : -1;
+  const activeIdx = stepOrder.indexOf(active);
 
   return (
     <nav
       aria-label="Formula authoring steps"
       className="flex flex-wrap items-center gap-1 border-b border-white/[0.06] pb-3"
     >
-      {STEPS.map((step, index) => {
-        const idx = stepIndex(step.id);
+      {steps.map((step, index) => {
+        const idx = stepOrder.indexOf(step.id);
         const isActive = step.id === active;
         const isComplete = idx < activeIdx || idx <= completedIdx;
         const clickable = onStepClick && idx <= Math.max(activeIdx, completedIdx + 1);

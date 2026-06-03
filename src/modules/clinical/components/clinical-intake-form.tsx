@@ -7,13 +7,20 @@ type ClinicalIntakeFormProps = {
   sections: ClinicalIntakeSection[];
   values: Record<string, unknown>;
   onValuesChange: (next: Record<string, unknown>) => void;
+  /** How many sections start expanded (rest collapsed). Defaults to all open. */
+  defaultOpenSections?: number;
 };
 
 export function ClinicalIntakeForm({
   sections,
   values,
   onValuesChange,
+  defaultOpenSections,
 }: ClinicalIntakeFormProps) {
+  const openCount =
+    defaultOpenSections === undefined
+      ? sections.length
+      : Math.max(0, defaultOpenSections);
   if (sections.length === 0) {
     return (
       <p className="text-sm text-zinc-500">
@@ -28,7 +35,7 @@ export function ClinicalIntakeForm({
         <DynamicClinicalSection
           key={section.factorSetId ?? section.slug}
           section={section}
-          defaultOpen={index < 2}
+          defaultOpen={index < openCount}
           values={values}
           onValuesChange={onValuesChange}
         />

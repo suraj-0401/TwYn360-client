@@ -41,11 +41,9 @@ import {
 } from "./formula-workspace-stepper";
 import type { OutcomeUpdatePayload } from "../utils/outcome-workspace-values";
 import { dtoToParameterInput } from "@/modules/models/utils/formula-parameters";
-import type {
-  FormulaDto,
-  FormulaParameterInput,
-  FormulaVersionDto,
-} from "@/types/formula";
+import { normalizeFormulaParametersForMappings } from "@/modules/models/utils/normalize-formula-parameters";
+import { resolveFormulaPayload } from "@/modules/models/utils/resolve-formula-payload";
+import type { FormulaParameterInput, FormulaVersionDto } from "@/types/formula";
 import type { FormulaVariablePoolItem } from "@/modules/models/utils/formula-variable-pool";
 
 const EMPTY_DEPENDENCY_SUMMARY: SimulationDependencySummary = {
@@ -74,19 +72,17 @@ function toFlowStep(tab: WorkspaceTab): FormulaWorkspaceStep {
   return tab === "formula" ? "studio" : "basics";
 }
 
-function resolveFormulaRecord(payload: unknown): FormulaDto | null {
-  if (!payload || typeof payload !== "object") {
-    return null;
-  }
-  const direct = payload as Partial<FormulaDto>;
-  if (typeof direct.id === "string" && typeof direct.rawExpression === "string") {
-    return direct as FormulaDto;
-  }
-  const wrapped = (payload as { data?: Partial<FormulaDto> }).data;
-  if (wrapped && typeof wrapped.id === "string" && typeof wrapped.rawExpression === "string") {
-    return wrapped as FormulaDto;
-  }
-  return null;
+function hasEnumTransformCandidates(variablePool: FormulaVariablePoolItem[]): boolean {
+  return variablePool.some((item) => {
+    const dataType = item.dataTypeCode?.toLowerCase?.() ?? "";
+    return dataType === "enum" || (item.enumOptions?.length ?? 0) > 0;
+  });
+}
+
+function getStepOrder(includeMappingStep: boolean): FormulaWorkspaceStep[] {
+  return includeMappingStep
+    ? ["basics", "parameters", "mapping", "studio", "review"]
+    : ["basics", "parameters", "studio", "review"];
 }
 
 export function OutcomeWorkspaceDialog({
@@ -111,6 +107,7 @@ export function OutcomeWorkspaceDialog({
     useState<SimulationDependencySummary>(EMPTY_DEPENDENCY_SUMMARY);
   const [formulaParameters, setFormulaParameters] = useState<FormulaParameterInput[]>([]);
   const [savingDetails, setSavingDetails] = useState(false);
+  const includeMappingStep = hasEnumTransformCandidates(variablePool);
 
   const outcome = outcomeQuery.data ?? null;
 
@@ -124,15 +121,20 @@ export function OutcomeWorkspaceDialog({
     setFlowStep(toFlowStep(initialTab));
   }, [open, outcomeId, initialTab]);
 
+  useEffect(() => {
+    if (flowStep === "mapping" && !includeMappingStep) {
+      setFlowStep("studio");
+    }
+  }, [flowStep, includeMappingStep]);
+
   const formulaQuery = useQuery({
     queryKey: ["formula-by-target", modelId, "outcome", outcome?.id],
     enabled: Boolean(open && outcome?.id),
-    queryFn: async () =>
-      (await getFormulaByTarget(modelId, "outcome", outcome!.id)).data,
+    queryFn: async () => getFormulaByTarget(modelId, "outcome", outcome!.id),
     retry: false,
   });
 
-  const currentFormula = resolveFormulaRecord(formulaQuery.data);
+  const currentFormula = resolveFormulaPayload(formulaQuery.data);
 
   const versionQuery = useQuery({
     queryKey: ["formula-versions", currentFormula?.id],
@@ -141,19 +143,20 @@ export function OutcomeWorkspaceDialog({
     retry: false,
   });
 
+  const formulaStatus = currentFormula?.status?.toLowerCase() ?? null;
   const canSubmitForReview =
     Boolean(currentFormula) &&
-    currentFormula?.status?.toLowerCase() === "valid";
+    formulaStatus !== "pending_review" &&
+    formulaStatus !== "approved";
   const canReviewDecision = currentFormula?.status?.toLowerCase() === "pending_review";
   const missingDependencies = dependencySummary.undeclared;
 
-  const initialFormulaParameters = useMemo(
-    () =>
-      currentFormula?.formulaParameters
-        ? dtoToParameterInput(currentFormula.formulaParameters)
-        : [],
-    [currentFormula?.formulaParameters, currentFormula?.id],
-  );
+  const initialFormulaParameters = useMemo(() => {
+    const next = currentFormula?.formulaParameters
+      ? dtoToParameterInput(currentFormula.formulaParameters)
+      : [];
+    return normalizeFormulaParametersForMappings(next, variablePool);
+  }, [currentFormula?.formulaParameters, variablePool]);
   useEffect(() => {
     setFormulaParameters(initialFormulaParameters);
   }, [initialFormulaParameters]);
@@ -172,12 +175,15 @@ export function OutcomeWorkspaceDialog({
       if (!outcome) {
         return null;
       }
-      const existing = currentFormula;
+      const existing = await getFormulaByTarget(modelId, "outcome", outcome.id);
       if (existing) {
         return (
           await updateFormula(existing.id, {
             rawExpression: expression,
-            formulaParameters,
+            formulaParameters: normalizeFormulaParametersForMappings(
+              formulaParameters,
+              variablePool,
+            ),
             expectedVersion: existing.version,
           })
         ).data;
@@ -191,7 +197,10 @@ export function OutcomeWorkspaceDialog({
           formulaKind: "outcome_model",
           formulaType: "deterministic",
           rawExpression: expression,
-          formulaParameters,
+          formulaParameters: normalizeFormulaParametersForMappings(
+            formulaParameters,
+            variablePool,
+          ),
           manualMode: false,
         })
       ).data;
@@ -207,12 +216,39 @@ export function OutcomeWorkspaceDialog({
   });
 
   const submitReviewMutation = useMutation({
-    mutationFn: async () => {
-      if (!currentFormula) {
-        throw new Error("Save a formula draft before submitting for review.");
+    mutationFn: async (expression: string) => {
+      if (!outcome) {
+        throw new Error("Outcome not loaded.");
       }
-      await submitFormulaForReview(currentFormula.id, {
-        expectedVersion: currentFormula.version,
+      const existing = await getFormulaByTarget(modelId, "outcome", outcome.id);
+      const savedFormula = existing
+        ? (
+            await updateFormula(existing.id, {
+              rawExpression: expression,
+              formulaParameters: normalizeFormulaParametersForMappings(
+                formulaParameters,
+                variablePool,
+              ),
+              expectedVersion: existing.version,
+            })
+          ).data
+        : (
+            await createFormula(modelId, {
+              modelId,
+              targetType: "outcome",
+              targetId: outcome.id,
+              formulaKind: "outcome_model",
+              formulaType: "deterministic",
+              rawExpression: expression,
+              formulaParameters: normalizeFormulaParametersForMappings(
+                formulaParameters,
+                variablePool,
+              ),
+              manualMode: false,
+            })
+          ).data;
+      await submitFormulaForReview(savedFormula.id, {
+        expectedVersion: savedFormula.version,
         changeNote: reviewNote.trim() || undefined,
       });
     },
@@ -321,13 +357,6 @@ export function OutcomeWorkspaceDialog({
               {outcome ? (
                 <>
                   <StatusBadge status={outcome.statusCode} />
-                  {currentFormula ? (
-                    <StatusBadge status={currentFormula.status} />
-                  ) : (
-                    <span className="rounded-md border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-zinc-500">
-                      No formula
-                    </span>
-                  )}
                 </>
               ) : null}
             </div>
@@ -340,7 +369,12 @@ export function OutcomeWorkspaceDialog({
               completedThrough={
                 formulaParameters.length > 0 ? "parameters" : "basics"
               }
+              includeMappingStep={includeMappingStep}
+              mappingLabel="Transformations"
             />
+            {!includeMappingStep ? (
+              <p className="mt-2 text-xs text-[#71717a]">No transformations required.</p>
+            ) : null}
           </div>
         </DialogHeader>
 
@@ -410,6 +444,19 @@ export function OutcomeWorkspaceDialog({
             </div>
           ) : null}
 
+          {outcome && flowStep === "mapping" && includeMappingStep ? (
+            <div className="mx-auto max-w-2xl space-y-4">
+              <h3 className="text-sm font-semibold text-[#f4f4f5]">
+                Step 3 — Transformations
+              </h3>
+              <p className="text-xs text-[#71717a]">
+                Enum/categorical inputs must be transformed to numeric values before formula
+                evaluation. Configure mappings in derived factors, then use those mapped aliases in
+                Formula Studio.
+              </p>
+            </div>
+          ) : null}
+
           {outcome && flowStep === "studio" ? (
             <div className="flex h-full min-h-0 flex-1 flex-col">
               {missingDependencies.length > 0 ? (
@@ -438,8 +485,8 @@ export function OutcomeWorkspaceDialog({
                   onSubmitForReview={
                     readOnly
                       ? undefined
-                      : async () => {
-                          await submitReviewMutation.mutateAsync();
+                      : async (storedExpression) => {
+                          await submitReviewMutation.mutateAsync(storedExpression);
                         }
                   }
                   isSavingDraft={saveDraftMutation.isPending}
@@ -558,12 +605,7 @@ export function OutcomeWorkspaceDialog({
                   variant="outline"
                   className="border-white/10 text-zinc-300"
                   onClick={() => {
-                    const order: FormulaWorkspaceStep[] = [
-                      "basics",
-                      "parameters",
-                      "studio",
-                      "review",
-                    ];
+                    const order = getStepOrder(includeMappingStep);
                     const idx = order.indexOf(flowStep);
                     if (idx > 0) {
                       setFlowStep(order[idx - 1]!);
@@ -578,12 +620,7 @@ export function OutcomeWorkspaceDialog({
                   type="button"
                   className="bg-cyan-600/90 text-white hover:bg-cyan-600"
                   onClick={() => {
-                    const order: FormulaWorkspaceStep[] = [
-                      "basics",
-                      "parameters",
-                      "studio",
-                      "review",
-                    ];
+                    const order = getStepOrder(includeMappingStep);
                     const idx = order.indexOf(flowStep);
                     if (idx < order.length - 1) {
                       setFlowStep(order[idx + 1]!);

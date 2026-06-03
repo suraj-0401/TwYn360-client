@@ -3,7 +3,6 @@
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -15,11 +14,15 @@ import type { DerivedFactorCreatePayload } from "../utils/derived-factor-workspa
 
 const CREATE_FORM_ID = "create-derived-factor-form";
 
+export type DerivedFactorCreateKind = "formula" | "categorical_mapping";
+
 type CreateDerivedFactorDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSubmit: (payload: DerivedFactorCreatePayload) => Promise<void>;
   isSubmitting?: boolean;
+  /** Locked type from the active tab (no type picker in dialog). */
+  defaultKind?: DerivedFactorCreateKind;
 };
 
 export function CreateDerivedFactorDialog({
@@ -27,16 +30,17 @@ export function CreateDerivedFactorDialog({
   onOpenChange,
   onSubmit,
   isSubmitting = false,
+  defaultKind = "formula",
 }: CreateDerivedFactorDialogProps) {
+  const isTransformation = defaultKind === "categorical_mapping";
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[90vh] flex-col border-white/10 bg-[#121214] text-zinc-100 sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Create derived factor</DialogTitle>
-          <DialogDescription className="text-zinc-400">
-            Derived factors are computed from raw model factors (e.g. BMI from weight and
-            height). Each can have its own formula.
-          </DialogDescription>
+          <DialogTitle>
+            {isTransformation ? "Add transformation" : "Create derived factor"}
+          </DialogTitle>
         </DialogHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-1">
@@ -46,7 +50,10 @@ export function CreateDerivedFactorDialog({
             hideSubmitButton
             layout="dialog"
             onSubmit={async (payload) => {
-              await onSubmit(payload as DerivedFactorCreatePayload);
+              await onSubmit({
+                ...(payload as DerivedFactorCreatePayload),
+                derivedFactorType: defaultKind,
+              });
             }}
           />
         </div>
@@ -66,7 +73,7 @@ export function CreateDerivedFactorDialog({
             form={CREATE_FORM_ID}
             loading={isSubmitting}
           >
-            Create derived factor
+            {isTransformation ? "Continue" : "Create"}
           </LoadingButton>
         </DialogFooter>
       </DialogContent>

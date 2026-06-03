@@ -96,6 +96,9 @@ export type OutcomeDefinitionDto = {
 };
 
 export type DerivedFactorDefinitionDto = {
+  derivedFactorType: "formula" | "categorical_mapping";
+  mappingConfig: DerivedFactorMappingConfigDto | null;
+  mappingVersion: number;
   id: string;
   modelId: string;
   slug: string;
@@ -108,6 +111,24 @@ export type DerivedFactorDefinitionDto = {
   updatedAt: string;
   createdBy: string | null;
   updatedBy: string | null;
+};
+
+export type DerivedFactorMappingRuleDto = {
+  key: string;
+  value: number;
+};
+
+export type DerivedFactorMappingOverrideDto = {
+  modelFactorInstanceId: string;
+  mappings: DerivedFactorMappingRuleDto[];
+  fallbackValue: number;
+};
+
+export type DerivedFactorMappingConfigDto = {
+  sourceFactorInstanceId: string;
+  mappings: DerivedFactorMappingRuleDto[];
+  fallbackValue: number;
+  overrides?: DerivedFactorMappingOverrideDto[];
 };
 
 export type FormulaTargetType = "outcome" | "derived_factor" | "factor_instance";

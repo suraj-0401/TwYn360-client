@@ -10,19 +10,28 @@ import {
   listDerivedFactors,
   updateDerivedFactor,
 } from "@/services/derived-factor.service";
-import type { DerivedFactorDefinitionDto } from "@/types/formula";
+import type {
+  DerivedFactorDefinitionDto,
+  DerivedFactorMappingConfigDto,
+} from "@/types/formula";
 
 type CreateDerivedFactorPayload = {
   slug: string;
   displayName: string;
   description?: string;
   unitCode?: string;
+  derivedFactorType?: "formula" | "categorical_mapping";
+  mappingConfig?: DerivedFactorMappingConfigDto;
+  mappingVersion?: number;
 };
 
 type UpdateDerivedFactorPayload = {
   displayName?: string;
   description?: string | null;
   unitCode?: string | null;
+  derivedFactorType?: "formula" | "categorical_mapping";
+  mappingConfig?: DerivedFactorMappingConfigDto | null;
+  mappingVersion?: number;
   expectedVersion?: number;
 };
 

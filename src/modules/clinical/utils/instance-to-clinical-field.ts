@@ -112,11 +112,13 @@ function buildFieldLabel(input: ClinicalIntakeInput): string {
 export function instanceToClinicalField(
   input: ClinicalIntakeInput,
 ): FieldDefinition {
-  const options = mapAllowedValues(input.allowedValues);
   const validations =
     input.validations && typeof input.validations === "object"
       ? (input.validations as Record<string, unknown>)
       : undefined;
+  const options =
+    mapAllowedValues(input.allowedValues) ??
+    mapAllowedValues(validations?.options);
 
   const unitShort = input.unitCode?.trim() || null;
   const config: FieldDefinition["config"] = {};

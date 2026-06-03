@@ -73,8 +73,7 @@ export function ModelOutcomesPanel({
   const formulaStatusQueries = useQueries({
     queries: items.map((item) => ({
       queryKey: ["formula-by-target", modelId, "outcome", item.id],
-      queryFn: async () =>
-        (await getFormulaByTarget(modelId, "outcome", item.id)).data,
+      queryFn: async () => getFormulaByTarget(modelId, "outcome", item.id),
       staleTime: 30_000,
     })),
   });

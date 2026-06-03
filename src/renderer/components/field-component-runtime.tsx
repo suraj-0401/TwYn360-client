@@ -360,6 +360,7 @@ export function FieldComponentRuntime({
           dataTypeCollectionId={dataTypeCollectionId}
           validations={validationsState}
           includeAllowedValues={false}
+          allowedValuesPlaceholder="Comma-separated enum values"
           onValidationChange={(fieldKey, fieldValue) =>
             onChange({ ...validationsState, [fieldKey]: fieldValue })
           }

@@ -6,11 +6,13 @@ import {
   poolItemKey,
   type FormulaVariablePoolItem,
 } from "@/modules/models/utils/formula-variable-pool";
+import { isNumericDataTypeCode } from "@/modules/models/utils/formula-numeric-pool";
 import {
   buildUnitByAlias,
   formatUnitLabel,
   resolveParameterUnit,
 } from "@/modules/models/utils/formula-unit-display";
+import { describeParameterSource } from "@/modules/models/utils/formula-pool-labels";
 
 type FormulaParametersStepProps = {
   variablePool: FormulaVariablePoolItem[];
@@ -28,15 +30,55 @@ export function FormulaParametersStep({
   const [staticAliasDraft, setStaticAliasDraft] = useState("");
   const [staticValueDraft, setStaticValueDraft] = useState("");
 
+  const numericPool = useMemo(
+    () => variablePool.filter((item) => {
+      if (item.sourceType === "DERIVED_FACTOR") {
+        return true;
+      }
+      return isNumericDataTypeCode(item.dataTypeCode);
+    }),
+    [variablePool],
+  );
+
   const dynamicPoolAvailable = useMemo(
-    () => variablePool.filter((item) => !parameters.some((param) => param.alias === item.alias)),
-    [parameters, variablePool],
+    () =>
+      numericPool.filter(
+        (item) => !parameters.some((param) => param.alias === item.alias),
+      ),
+    [numericPool, parameters],
   );
 
   const unitByAlias = useMemo(() => buildUnitByAlias(variablePool), [variablePool]);
+  const poolByAlias = useMemo(
+    () => new Map(variablePool.map((item) => [item.alias, item])),
+    [variablePool],
+  );
 
-  const factorInstances = dynamicPoolAvailable.filter((item) => item.sourceType === "FACTOR_INSTANCE");
-  const derivedFactors = dynamicPoolAvailable.filter((item) => item.sourceType === "DERIVED_FACTOR");
+  const factorInstances = dynamicPoolAvailable.filter(
+    (item) => item.sourceType === "FACTOR_INSTANCE",
+  );
+  const transformationFactors = dynamicPoolAvailable.filter(
+    (item) =>
+      item.sourceType === "DERIVED_FACTOR" &&
+      item.derivedFactorType === "categorical_mapping",
+  );
+  const formulaDerivedFactors = dynamicPoolAvailable.filter(
+    (item) =>
+      item.sourceType === "DERIVED_FACTOR" &&
+      item.derivedFactorType !== "categorical_mapping",
+  );
+
+  const enumSourcesWithoutMapping = useMemo(() => {
+    return variablePool.filter((item) => {
+      if (item.sourceType !== "FACTOR_INSTANCE") {
+        return false;
+      }
+      if (isNumericDataTypeCode(item.dataTypeCode)) {
+        return false;
+      }
+      return !item.mappedDerivedFactorId;
+    });
+  }, [variablePool]);
 
   function addDynamic(item: FormulaVariablePoolItem) {
     if (parameters.some((param) => param.alias === item.alias)) {
@@ -79,29 +121,28 @@ export function FormulaParametersStep({
   return (
     <div className="mx-auto flex h-full min-h-0 max-w-3xl flex-col gap-6 overflow-y-auto overscroll-y-contain pb-2 [-webkit-overflow-scrolling:touch]">
       <div className="shrink-0">
-        <h3 className="text-sm font-semibold text-[#f4f4f5]">Step 2 — Parameters</h3>
+        <h3 className="text-sm font-semibold text-[#f4f4f5]">Parameters</h3>
         <p className="mt-1 text-xs text-[#71717a]">
-          Declare dynamic inputs (factor instances, derived factors) and static constants before
-          authoring the expression in Formula Studio.
+          Add inputs, then click Next to save. Use transformation outputs for enum fields.
         </p>
       </div>
 
       <section className="shrink-0 rounded-xl border border-white/[0.08] bg-[#121214] p-4">
         <p className="mb-3 text-[10px] font-medium uppercase tracking-wide text-[#71717a]">
-          Dynamic inputs
+          Numeric inputs for formulas
         </p>
-        {variablePool.length === 0 ? (
+        {numericPool.length === 0 ? (
           <p className="text-xs text-amber-200/90">
-            Attach factor sets and/or create derived factors on this model first.
+            Attach factor sets and/or create transformation derived factors on this model first.
           </p>
         ) : dynamicPoolAvailable.length === 0 ? (
-          <p className="text-xs text-[#71717a]">All model inputs are declared.</p>
+          <p className="text-xs text-[#71717a]">All available inputs are declared.</p>
         ) : (
           <div className="space-y-3">
             {factorInstances.length > 0 ? (
               <div>
                 <p className="mb-2 text-[10px] uppercase tracking-wide text-[#52525b]">
-                  Factor instances
+                  Raw numeric
                 </p>
                 <div className="grid gap-2 sm:grid-cols-2">
                   {factorInstances.map((item) => (
@@ -110,6 +151,7 @@ export function FormulaParametersStep({
                       alias={item.alias}
                       label={item.label}
                       unit={formatUnitLabel(item.unitCode)}
+                      hint="raw factor"
                       disabled={readOnly}
                       onAdd={() => addDynamic(item)}
                     />
@@ -117,18 +159,39 @@ export function FormulaParametersStep({
                 </div>
               </div>
             ) : null}
-            {derivedFactors.length > 0 ? (
+            {transformationFactors.length > 0 ? (
               <div>
                 <p className="mb-2 text-[10px] uppercase tracking-wide text-[#52525b]">
-                  Derived factors
+                  Transformation outputs
                 </p>
                 <div className="grid gap-2 sm:grid-cols-2">
-                  {derivedFactors.map((item) => (
+                  {transformationFactors.map((item) => (
                     <PoolCard
                       key={poolItemKey(item)}
                       alias={item.alias}
                       label={item.label}
                       unit={formatUnitLabel(item.unitCode)}
+                      hint="transform"
+                      disabled={readOnly}
+                      onAdd={() => addDynamic(item)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {formulaDerivedFactors.length > 0 ? (
+              <div>
+                <p className="mb-2 text-[10px] uppercase tracking-wide text-[#52525b]">
+                  Other derived factors
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {formulaDerivedFactors.map((item) => (
+                    <PoolCard
+                      key={poolItemKey(item)}
+                      alias={item.alias}
+                      label={item.label}
+                      unit={formatUnitLabel(item.unitCode)}
+                      hint="derived factor"
                       disabled={readOnly}
                       onAdd={() => addDynamic(item)}
                     />
@@ -138,6 +201,12 @@ export function FormulaParametersStep({
             ) : null}
           </div>
         )}
+        {enumSourcesWithoutMapping.length > 0 ? (
+          <p className="mt-3 text-[10px] text-amber-300/80">
+            Set up transformations for:{" "}
+            {enumSourcesWithoutMapping.map((row) => row.alias).join(", ")}
+          </p>
+        ) : null}
       </section>
 
       <section className="shrink-0 rounded-xl border border-white/[0.08] bg-[#121214] p-4">
@@ -182,36 +251,36 @@ export function FormulaParametersStep({
             {parameters.map((param) => {
               const unit = resolveParameterUnit(param, unitByAlias);
               return (
-              <li
-                key={param.alias}
-                className="flex items-center justify-between rounded-md border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-xs"
-              >
-                <div>
-                  <p className="font-mono text-[#e4e4e7]">
-                    {param.alias}
-                    {unit ? (
-                      <span className="ml-1.5 font-sans text-[10px] text-[#71717a]">({unit})</span>
-                    ) : null}
-                  </p>
-                  <p className="text-[10px] text-[#71717a]">
-                    {param.type === "STATIC"
-                      ? `Static · ${param.defaultValue ?? "—"}${unit ? ` ${unit}` : ""}`
-                      : param.sourceType === "DERIVED_FACTOR"
-                        ? `Dynamic · derived factor${unit ? ` · ${unit}` : ""}`
-                        : `Dynamic · factor instance${unit ? ` · ${unit}` : ""}`}
-                  </p>
-                </div>
-                {!readOnly ? (
-                  <button
-                    type="button"
-                    onClick={() => remove(param.alias)}
-                    className="text-[10px] text-[#71717a] hover:text-rose-400"
-                  >
-                    Remove
-                  </button>
-                ) : null}
-              </li>
-            );
+                <li
+                  key={param.alias}
+                  className="flex items-center justify-between rounded-md border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-xs"
+                >
+                  <div>
+                    <p className="font-mono text-[#e4e4e7]">
+                      {param.alias}
+                      {unit ? (
+                        <span className="ml-1.5 font-sans text-[10px] text-[#71717a]">
+                          ({unit})
+                        </span>
+                      ) : null}
+                    </p>
+                    <p className="text-[10px] text-[#71717a]">
+                      {param.type === "STATIC"
+                        ? `Static · ${param.defaultValue ?? "—"}${unit ? ` ${unit}` : ""}`
+                        : `Dynamic · ${describeParameterSource(param, poolByAlias)}${unit ? ` · ${unit}` : ""}`}
+                    </p>
+                  </div>
+                  {!readOnly ? (
+                    <button
+                      type="button"
+                      onClick={() => remove(param.alias)}
+                      className="text-[10px] text-[#71717a] hover:text-rose-400"
+                    >
+                      Remove
+                    </button>
+                  ) : null}
+                </li>
+              );
             })}
           </ul>
         )}
@@ -225,12 +294,16 @@ function PoolCard({
   label,
   unit,
   disabled,
+  disabledReason,
+  hint,
   onAdd,
 }: {
   alias: string;
   label: string;
   unit: string | null;
   disabled: boolean;
+  disabledReason?: string;
+  hint?: string;
   onAdd: () => void;
 }) {
   return (
@@ -248,8 +321,14 @@ function PoolCard({
           ) : null}
         </p>
         <p className="truncate text-[10px] text-[#71717a]">{label}</p>
+        {hint ? <p className="truncate text-[10px] text-cyan-300/70">{hint}</p> : null}
+        {disabledReason ? (
+          <p className="truncate text-[10px] text-amber-300/80">{disabledReason}</p>
+        ) : null}
       </div>
-      <span className="shrink-0 text-[10px] text-cyan-300/80">Add</span>
+      <span className="shrink-0 text-[10px] text-cyan-300/80">
+        {disabledReason ? "Unavailable" : "Add"}
+      </span>
     </button>
   );
 }

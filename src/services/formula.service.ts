@@ -1,4 +1,5 @@
 import { apiClient } from "@/lib/axios";
+import { resolveFormulaPayload } from "@/modules/models/utils/resolve-formula-payload";
 import type { ApiSuccessResponse } from "@/types/api";
 import type {
   FormulaDto,
@@ -33,18 +34,18 @@ export async function getFormulaByTarget(
   modelId: string,
   targetType: FormulaTargetType,
   targetId: string,
-) {
+): Promise<FormulaDto | null> {
   const pathByTarget: Record<FormulaTargetType, string> = {
     outcome: `/api/v1/models/${modelId}/outcomes/${targetId}/formula`,
     derived_factor: `/api/v1/models/${modelId}/derived-factors/${targetId}/formula`,
     factor_instance: `/api/v1/models/${modelId}/factor-instances/${targetId}/formula`,
   };
 
-  const { data } = await apiClient.get<ApiSuccessResponse<FormulaDto | null>>(
+  const { data: envelope } = await apiClient.get<ApiSuccessResponse<unknown>>(
     pathByTarget[targetType],
     { skipGlobalErrorToast: true },
   );
-  return data;
+  return resolveFormulaPayload(envelope);
 }
 
 /** Legacy helper — factor instance formulas. */

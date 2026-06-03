@@ -1,6 +1,9 @@
 import { normalizeFieldType } from "@/renderer/field-metadata.registry";
 import type { FieldDefinition } from "@/renderer/types";
-import type { DerivedFactorDefinitionDto } from "@/types/formula";
+import type {
+  DerivedFactorDefinitionDto,
+  DerivedFactorMappingConfigDto,
+} from "@/types/formula";
 import { isCoreDerivedFactorField } from "./derived-factor-core-fields";
 
 export function emptyFormValues(
@@ -44,12 +47,16 @@ export type DerivedFactorCreatePayload = {
   displayName: string;
   description?: string;
   unitCode?: string;
+  derivedFactorType?: "formula" | "categorical_mapping";
 };
 
 export type DerivedFactorUpdatePayload = {
   displayName: string;
   description?: string | null;
   unitCode?: string | null;
+  derivedFactorType?: "formula" | "categorical_mapping";
+  mappingConfig?: DerivedFactorMappingConfigDto | null;
+  mappingVersion?: number;
 };
 
 function readTrimmedString(values: Record<string, unknown>, fieldId: string): string {

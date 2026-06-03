@@ -1,4 +1,8 @@
-import { coerceValidationsForSubmit } from "@/lib/lookup-metadata";
+import {
+  coerceValidationsForSubmit,
+  validationFieldTypesForDataType,
+} from "@/lib/lookup-metadata";
+import { rendererFieldIdMatchesKey, toRendererFieldId } from "@/renderer/utils/field-keys";
 import { normalizeFieldType } from "@/renderer/field-metadata.registry";
 import type { FieldDefinition, FormDefinitionPayload } from "@/renderer/types";
 import type { Factor, FactorListItem } from "@/types/factor";
@@ -134,6 +138,17 @@ export function factorToFormValues(
   return values;
 }
 
+export function resolveFieldIdByKey(
+  fields: Record<string, FieldDefinition>,
+  fieldKey: string,
+): string | undefined {
+  const direct = toRendererFieldId(fieldKey);
+  if (fields[direct]) {
+    return direct;
+  }
+  return Object.keys(fields).find((id) => rendererFieldIdMatchesKey(id, fieldKey));
+}
+
 export function resolveDataTypeFieldId(
   fields: Record<string, FieldDefinition>,
 ): string | undefined {
@@ -241,12 +256,16 @@ export function valuesToFactorPayload(
     }
 
     if (type === "dynamic-validations") {
+      const dataTypeFieldId = resolveDataTypeFieldId(fields);
+      const dataTypeCode = dataTypeFieldId
+        ? String(values[dataTypeFieldId] ?? "").trim()
+        : "";
       const validations = coerceValidationsForSubmit(
         (raw as Record<string, unknown>) ?? {},
-        undefined,
+        validationFieldTypesForDataType(dataTypeCode),
       );
       if (Object.keys(validations).length > 0) {
-        payload[fieldId] = validations;
+        payload.validations = validations;
       }
       continue;
     }

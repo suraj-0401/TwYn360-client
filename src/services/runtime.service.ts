@@ -12,14 +12,22 @@ export async function getModelRuntimePlan(
   return data;
 }
 
+export type RuntimeExecuteInputs = Record<
+  string,
+  string | number | boolean | null
+>;
+
+/** Clinical model execution can run multiple simulation evaluations; allow extra time. */
+const EXECUTE_TIMEOUT_MS = 120_000;
+
 export async function executeModel(
   modelId: string,
-  inputs: Record<string, number>,
+  inputs: RuntimeExecuteInputs,
 ): Promise<ApiSuccessResponse<RuntimeExecutionResult>> {
   const { data } = await apiClient.post<ApiSuccessResponse<RuntimeExecutionResult>>(
     `/api/v1/models/${modelId}/execute`,
     { inputs },
-    { skipGlobalErrorToast: true },
+    { skipGlobalErrorToast: true, timeout: EXECUTE_TIMEOUT_MS },
   );
   return data;
 }

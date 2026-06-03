@@ -29,6 +29,12 @@ import {
 import type { FormulaParameterInput } from "@/types/formula";
 import type { SimulationDependencySummary } from "@/services/simulation-formula.service";
 import type { FormulaVariablePoolItem } from "@/modules/models/utils/formula-variable-pool";
+import { filterNumericFormulaPool } from "@/modules/models/utils/formula-numeric-pool";
+import {
+  describeParameterSource,
+  describePoolItemSource,
+  resolvePoolItemForParameter,
+} from "@/modules/models/utils/formula-pool-labels";
 import {
   buildUnitByAlias,
   formatUnitLabel,
@@ -49,10 +55,11 @@ export type FormulaStudioProps = {
   targetUnitCode?: string | null;
   initialExpression?: string;
   onSaveDraft?: (storedExpression: string) => Promise<void>;
-  onSubmitForReview?: () => Promise<void>;
+  onSubmitForReview?: (storedExpression: string) => Promise<void>;
   isSavingDraft?: boolean;
   isSubmittingReview?: boolean;
   canSubmitForReview?: boolean;
+  submitDisabledReason?: string;
   governanceStatus?: string | null;
   governanceVersion?: number | null;
   governanceUpdatedAt?: string | null;
@@ -127,12 +134,13 @@ const PARSE_DEBOUNCE_MS = 400;
 function parameterDetailLine(
   param: FormulaParameterInput,
   unit: string | null,
+  poolByAlias: Map<string, FormulaVariablePoolItem>,
 ): string {
   if (param.type === "STATIC") {
     const value = param.defaultValue ?? "?";
     return unit ? `constant · ${value} ${unit}` : `constant · ${value}`;
   }
-  const source = param.sourceType === "DERIVED_FACTOR" ? "derived factor" : "factor instance";
+  const source = describeParameterSource(param, poolByAlias);
   return unit ? `${source} · ${unit}` : source;
 }
 
@@ -146,6 +154,7 @@ export function FormulaStudio({
   isSavingDraft = false,
   isSubmittingReview = false,
   canSubmitForReview = true,
+  submitDisabledReason,
   governanceStatus,
   governanceVersion,
   governanceUpdatedAt,
@@ -155,7 +164,19 @@ export function FormulaStudio({
   formulaParameters,
 }: FormulaStudioProps) {
   const targetUnitLabel = formatUnitLabel(targetUnitCode);
-  const unitByAlias = useMemo(() => buildUnitByAlias(variablePool), [variablePool]);
+  const numericPool = useMemo(
+    () => filterNumericFormulaPool(variablePool),
+    [variablePool],
+  );
+  const unitByAlias = useMemo(() => buildUnitByAlias(numericPool), [numericPool]);
+  const variableByAlias = useMemo(
+    () => new Map(numericPool.map((item) => [item.alias, item])),
+    [numericPool],
+  );
+  const poolByAlias = useMemo(
+    () => new Map(variablePool.map((item) => [item.alias, item])),
+    [variablePool],
+  );
 
   const emptyDisplayExpression = useMemo(
     () => toDisplayFormulaExpression(targetAlias, ""),
@@ -300,6 +321,17 @@ export function FormulaStudio({
 
   const searchLower = inputSearch.trim().toLowerCase();
 
+  const availableTransformationFactors = useMemo(
+    () =>
+      numericPool.filter(
+        (item) =>
+          item.sourceType === "DERIVED_FACTOR" &&
+          item.derivedFactorType === "categorical_mapping" &&
+          !formulaParameters.some((param) => param.alias === item.alias),
+      ),
+    [formulaParameters, numericPool],
+  );
+
   const filteredInsertables = useMemo(() => {
     const items: Array<{ kind: "param" | "fn" | "op"; label: string; insert: string; detail?: string }> =
       [];
@@ -309,7 +341,7 @@ export function FormulaStudio({
         kind: "param",
         label: param.alias,
         insert: param.alias,
-        detail: parameterDetailLine(param, unit),
+        detail: parameterDetailLine(param, unit, poolByAlias),
       });
     }
     for (const group of FORMULA_TOOLBAR_GROUPS) {
@@ -325,10 +357,10 @@ export function FormulaStudio({
         item.label.toLowerCase().includes(searchLower) ||
         (item.detail?.toLowerCase().includes(searchLower) ?? false),
     );
-  }, [formulaParameters, searchLower, unitByAlias]);
+  }, [formulaParameters, poolByAlias, searchLower, unitByAlias]);
 
   const templateOptions = useMemo<TemplatePreset[]>(() => {
-    const [first, second] = variablePool;
+    const [first, second] = numericPool;
     if (!first) {
       return [];
     }
@@ -358,7 +390,7 @@ export function FormulaStudio({
         expression: second ? `${targetAlias} = ${a} * ${b}` : `${targetAlias} = ${a}`,
       },
     ];
-  }, [targetAlias, variablePool]);
+  }, [numericPool, targetAlias]);
 
   function applyEditorValue(nextValue: string) {
     setExpression(nextValue);
@@ -439,7 +471,10 @@ export function FormulaStudio({
             label: item.alias,
             kind: monaco.languages.CompletionItemKind.Variable,
             insertText: item.alias,
-            detail: item.type === "STATIC" ? "Static parameter" : "Dynamic parameter",
+            detail:
+              item.type === "STATIC"
+                ? "constant"
+                : describeParameterSource(item, poolByAlias),
             range,
           }));
           const functionItems = functions.map((name) => ({
@@ -473,7 +508,7 @@ export function FormulaStudio({
       completionRef.current?.dispose();
       completionRef.current = null;
     };
-  }, [formulaParameters, monacoReady, templateOptions]);
+  }, [formulaParameters, monacoReady, poolByAlias, templateOptions]);
 
   useEffect(() => {
     const monaco = monacoRef.current;
@@ -628,17 +663,6 @@ export function FormulaStudio({
     targetAlias,
   ]);
 
-  const statusLabel =
-    validateState === "validating"
-      ? "Validating…"
-      : validateState === "valid"
-        ? "Valid"
-        : validateState === "broken"
-          ? "Issues found"
-          : validateState === "offline"
-            ? "Offline"
-            : "Waiting for input";
-
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-white/[0.08] bg-[#121214]">
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] px-4 py-3">
@@ -650,23 +674,11 @@ export function FormulaStudio({
             {targetLabel} · <span className="font-mono">{targetAlias}</span> · draft v
             {governanceVersion ?? 1}
           </p>
+          <p className="mt-1 text-[10px] text-[#52525b]">
+            Numeric inputs only — use transformation outputs (e.g. rs_test), not raw enums.
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span
-            className={cn(
-              "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium",
-              validateState === "valid"
-                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
-                : validateState === "broken"
-                  ? "border-rose-500/30 bg-rose-500/10 text-rose-200"
-                  : "border-amber-500/30 bg-amber-500/10 text-amber-200",
-            )}
-          >
-            {validateState === "validating" ? (
-              <Loader2 className="size-3 animate-spin" />
-            ) : null}
-            {statusLabel}
-          </span>
           <button
             type="button"
             onClick={() => {
@@ -683,8 +695,18 @@ export function FormulaStudio({
           </button>
           <button
             type="button"
-            onClick={() => onSubmitForReview && void onSubmitForReview().catch(() => undefined)}
+            onClick={() => {
+              if (!onSubmitForReview) {
+                return;
+              }
+              const stored = toStoredFormulaExpression(expression, targetAlias);
+              if (!stored) {
+                return;
+              }
+              void onSubmitForReview(stored).catch(() => undefined);
+            }}
             disabled={isSubmittingReview || !canSubmitForReview}
+            title={!canSubmitForReview ? submitDisabledReason : undefined}
             className="inline-flex items-center gap-1 rounded-md border border-white/[0.08] px-3 py-1.5 text-xs text-[#a1a1aa] disabled:opacity-50"
           >
             {isSubmittingReview ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
@@ -747,6 +769,24 @@ export function FormulaStudio({
                   ))}
               </div>
             )}
+            {availableTransformationFactors.length > 0 ? (
+              <div>
+                <p className="mb-1.5 text-[9px] uppercase tracking-wide text-[#52525b]">
+                  Add in Parameters first
+                </p>
+                {availableTransformationFactors.map((item) => (
+                  <div
+                    key={item.derivedFactorId ?? item.alias}
+                    className="mb-1 rounded-md border border-cyan-500/20 bg-cyan-500/5 px-2 py-1.5"
+                  >
+                    <span className="font-mono text-xs text-cyan-100/90">{item.alias}</span>
+                    <span className="block text-[10px] text-[#71717a]">
+                      {item.label} · transform
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             <div>
               <p className="mb-1.5 text-[9px] uppercase tracking-wide text-[#52525b]">
                 Functions
@@ -870,33 +910,73 @@ export function FormulaStudio({
                   <div className="space-y-1.5">
                     {sandboxParameters.map((param) => {
                       const unit = resolveParameterUnit(param, unitByAlias);
+                      const variable = resolvePoolItemForParameter(param, numericPool);
+                      const enumOptions = variable?.enumOptions ?? [];
+                      const enumValueToNumber = variable?.enumValueToNumber ?? {};
                       return (
                         <label key={param.alias} className="block">
-                          <span className="mb-0.5 flex items-baseline gap-1 font-mono text-[10px] text-[#a1a1aa]">
+                          <span className="mb-0.5 flex flex-wrap items-baseline gap-1 font-mono text-[10px] text-[#a1a1aa]">
                             {param.alias}
                             {unit ? (
                               <span className="font-sans text-[#52525b]">({unit})</span>
                             ) : null}
+                            {variable ? (
+                              <span className="font-sans text-[#52525b]">
+                                · {describePoolItemSource(variable)}
+                              </span>
+                            ) : null}
                           </span>
                           <div className="flex items-center gap-1.5">
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              value={sandboxDraft[param.alias] ?? ""}
-                              onChange={(e) => {
-                                setSandboxRun({ status: "idle" });
-                                setSandboxDraft((prev) => ({
-                                  ...prev,
-                                  [param.alias]: e.target.value,
-                                }));
-                              }}
-                              placeholder={
-                                param.type === "STATIC"
-                                  ? String(param.defaultValue ?? "0")
-                                  : "0"
-                              }
-                              className="min-w-0 flex-1 rounded border border-white/10 bg-white/[0.03] px-2 py-1 font-mono text-[11px] text-zinc-200"
-                            />
+                            {enumOptions.length > 0 ? (
+                              <select
+                                value={sandboxDraft[param.alias] ?? ""}
+                                onChange={(e) => {
+                                  setSandboxRun({ status: "idle" });
+                                  setSandboxDraft((prev) => ({
+                                    ...prev,
+                                    [param.alias]: e.target.value,
+                                  }));
+                                }}
+                                className="min-w-0 flex-1 rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-[11px] text-zinc-200"
+                              >
+                                <option value="">
+                                  {variable?.derivedFactorType === "categorical_mapping"
+                                    ? "Select mapped value"
+                                    : "Select value"}
+                                </option>
+                                {enumOptions.map((option) => (
+                                  <option
+                                    key={`${param.alias}-${option.value}`}
+                                    value={
+                                      enumValueToNumber[option.value] !== undefined
+                                        ? String(enumValueToNumber[option.value])
+                                        : option.value
+                                    }
+                                  >
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={sandboxDraft[param.alias] ?? ""}
+                                onChange={(e) => {
+                                  setSandboxRun({ status: "idle" });
+                                  setSandboxDraft((prev) => ({
+                                    ...prev,
+                                    [param.alias]: e.target.value,
+                                  }));
+                                }}
+                                placeholder={
+                                  param.type === "STATIC"
+                                    ? String(param.defaultValue ?? "0")
+                                    : "0"
+                                }
+                                className="min-w-0 flex-1 rounded border border-white/10 bg-white/[0.03] px-2 py-1 font-mono text-[11px] text-zinc-200"
+                              />
+                            )}
                             {unit ? (
                               <span className="shrink-0 text-[10px] font-medium text-[#71717a]">
                                 {unit}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useConfirm } from "@/components/feedback";
 import { LoadingButton } from "@/components/feedback/loaders/loading-button";
@@ -31,22 +31,25 @@ import type { SimulationDependencySummary } from "@/services/simulation-formula.
 import {
   useDerivedFactor,
   useDerivedFactorMutations,
+  useDerivedFactors,
 } from "../hooks/use-derived-factors";
+import { buildFormulaVariablePool } from "@/modules/models/utils/formula-variable-pool";
+import type { FormulaWorkspaceStepConfig } from "@/modules/models/components/formula-workspace-stepper";
 import { DerivedFactorForm } from "./derived-factor-form";
 import { FormulaStudio } from "./formula-playground-skeleton";
 import { FormulaParametersStep } from "./formula-parameters-step";
+import { DerivedFactorMappingStep } from "./derived-factor-mapping-step";
 import {
   FormulaWorkspaceStepper,
   type FormulaWorkspaceStep,
 } from "./formula-workspace-stepper";
 import type { DerivedFactorUpdatePayload } from "../utils/derived-factor-workspace-values";
 import { dtoToParameterInput } from "@/modules/models/utils/formula-parameters";
-import type {
-  FormulaDto,
-  FormulaParameterInput,
-  FormulaVersionDto,
-} from "@/types/formula";
+import { normalizeFormulaParametersForMappings } from "@/modules/models/utils/normalize-formula-parameters";
+import { resolveFormulaPayload } from "@/modules/models/utils/resolve-formula-payload";
+import type { FormulaParameterInput, FormulaVersionDto } from "@/types/formula";
 import type { FormulaVariablePoolItem } from "@/modules/models/utils/formula-variable-pool";
+import { useModelFactorInstances } from "../hooks/use-model-factor-instances";
 
 const EMPTY_DEPENDENCY_SUMMARY: SimulationDependencySummary = {
   usedDynamic: [],
@@ -65,28 +68,21 @@ type DerivedFactorWorkspaceDialogProps = {
   readOnly?: boolean;
   variablePool: FormulaVariablePoolItem[];
   initialTab?: "details" | "formula";
+  /** When set, opens directly on this wizard step (overrides `initialTab`). */
+  initialFlowStep?: FormulaWorkspaceStep;
   onDeleted?: () => void;
 };
 
 type WorkspaceTab = "details" | "formula";
 
-function toFlowStep(tab: WorkspaceTab): FormulaWorkspaceStep {
-  return tab === "formula" ? "studio" : "basics";
-}
-
-function resolveFormulaRecord(payload: unknown): FormulaDto | null {
-  if (!payload || typeof payload !== "object") {
-    return null;
+function toFlowStep(
+  tab: WorkspaceTab,
+  isTransformation: boolean,
+): FormulaWorkspaceStep {
+  if (tab === "formula") {
+    return isTransformation ? "mapping" : "studio";
   }
-  const direct = payload as Partial<FormulaDto>;
-  if (typeof direct.id === "string" && typeof direct.rawExpression === "string") {
-    return direct as FormulaDto;
-  }
-  const wrapped = (payload as { data?: Partial<FormulaDto> }).data;
-  if (wrapped && typeof wrapped.id === "string" && typeof wrapped.rawExpression === "string") {
-    return wrapped as FormulaDto;
-  }
-  return null;
+  return "basics";
 }
 
 export function DerivedFactorWorkspaceDialog({
@@ -97,42 +93,84 @@ export function DerivedFactorWorkspaceDialog({
   readOnly = false,
   variablePool,
   initialTab = "details",
+  initialFlowStep,
   onDeleted,
 }: DerivedFactorWorkspaceDialogProps) {
   const queryClient = useQueryClient();
   const { confirm } = useConfirm();
   const { updateMutation, deleteMutation } = useDerivedFactorMutations(modelId);
+  const factorInstancesQuery = useModelFactorInstances(modelId);
+  const derivedFactorsQuery = useDerivedFactors(modelId);
   const derivedQuery = useDerivedFactor(modelId, open ? derivedFactorId : null);
 
-  const [flowStep, setFlowStep] = useState<FormulaWorkspaceStep>(toFlowStep(initialTab));
+  const [flowStep, setFlowStep] = useState<FormulaWorkspaceStep>("basics");
   const [reviewNote, setReviewNote] = useState("");
   const [decisionNote, setDecisionNote] = useState("");
   const [dependencySummary, setDependencySummary] =
     useState<SimulationDependencySummary>(EMPTY_DEPENDENCY_SUMMARY);
+  const [formulaValidateState, setFormulaValidateState] = useState<
+    "idle" | "validating" | "valid" | "broken" | "offline"
+  >("idle");
   const [formulaParameters, setFormulaParameters] = useState<FormulaParameterInput[]>([]);
+  const parametersDirtyRef = useRef(false);
   const [savingDetails, setSavingDetails] = useState(false);
 
   const derived = derivedQuery.data ?? null;
+  const isTransformation =
+    derived?.derivedFactorType === "categorical_mapping";
+
+  const workspaceVariablePool = useMemo(
+    () =>
+      buildFormulaVariablePool({
+        factorInstances: factorInstancesQuery.data ?? [],
+        derivedFactors: derivedFactorsQuery.data ?? [],
+        excludeDerivedFactorId: derivedFactorId,
+        preferredMappingDerivedFactorId: derivedFactorId,
+      }),
+    [derivedFactorId, derivedFactorsQuery.data, factorInstancesQuery.data],
+  );
+
+  const activeVariablePool =
+    workspaceVariablePool.length > 0 ? workspaceVariablePool : variablePool;
+
+  const wizardSteps = useMemo((): FormulaWorkspaceStepConfig[] => {
+    if (isTransformation) {
+      return [
+        { id: "basics", label: "Basics" },
+        { id: "mapping", label: "Transformations" },
+        { id: "review", label: "Review" },
+      ];
+    }
+    return [
+      { id: "basics", label: "Basics" },
+      { id: "parameters", label: "Parameters" },
+      { id: "studio", label: "Formula Studio" },
+      { id: "review", label: "Review" },
+    ];
+  }, [isTransformation]);
 
   useEffect(() => {
     if (!open) {
-      setFlowStep(toFlowStep(initialTab));
+      setFlowStep("basics");
       setReviewNote("");
       setDecisionNote("");
       return;
     }
-    setFlowStep(toFlowStep(initialTab));
-  }, [open, derivedFactorId, initialTab]);
+    if (initialFlowStep) {
+      setFlowStep(initialFlowStep);
+      return;
+    }
+    setFlowStep(toFlowStep(initialTab, isTransformation));
+  }, [open, derivedFactorId, initialTab, initialFlowStep, isTransformation]);
 
   const formulaQuery = useQuery({
     queryKey: ["formula-by-target", modelId, "derived_factor", derived?.id],
     enabled: Boolean(open && derived?.id),
-    queryFn: async () =>
-      (await getFormulaByTarget(modelId, "derived_factor", derived!.id)).data,
+    queryFn: async () => getFormulaByTarget(modelId, "derived_factor", derived!.id),
     retry: false,
   });
 
-  const currentFormula = resolveFormulaRecord(formulaQuery.data);
+  const currentFormula = resolveFormulaPayload(formulaQuery.data);
 
   const versionQuery = useQuery({
     queryKey: ["formula-versions", currentFormula?.id],
@@ -141,43 +179,180 @@ export function DerivedFactorWorkspaceDialog({
     retry: false,
   });
 
-  const canSubmitForReview =
-    Boolean(currentFormula) &&
-    currentFormula?.status?.toLowerCase() === "valid";
-  const canReviewDecision = currentFormula?.status?.toLowerCase() === "pending_review";
+  const formulaStatus = currentFormula?.status?.toLowerCase() ?? null;
   const missingDependencies = dependencySummary.undeclared;
-
-  const initialFormulaParameters = useMemo(
-    () =>
-      currentFormula?.formulaParameters
-        ? dtoToParameterInput(currentFormula.formulaParameters)
-        : [],
-    [currentFormula?.formulaParameters, currentFormula?.id],
+  const mappingIsConfigured = Boolean(
+    derived?.mappingConfig?.sourceFactorInstanceId &&
+      (derived.mappingConfig.mappings?.length ?? 0) > 0,
   );
+  const canSubmitForReview =
+    !readOnly &&
+    !isTransformation &&
+    formulaStatus !== "pending_review" &&
+    formulaStatus !== "approved" &&
+    formulaValidateState === "valid" &&
+    missingDependencies.length === 0;
+  const submitDisabledReason = isTransformation
+    ? "Transformation factors do not use Formula Studio"
+    : formulaStatus === "pending_review"
+      ? "Already submitted for review"
+      : formulaStatus === "approved"
+        ? "Formula is already approved"
+        : formulaValidateState === "offline"
+          ? "Simulation service offline"
+          : formulaValidateState !== "valid"
+            ? "Enter a valid formula expression before submit"
+            : missingDependencies.length > 0
+              ? `Undeclared: ${missingDependencies.join(", ")}`
+              : undefined;
+  const canReviewDecision = currentFormula?.status?.toLowerCase() === "pending_review";
+
+  const initialFormulaParameters = useMemo(() => {
+    const next = currentFormula?.formulaParameters
+      ? dtoToParameterInput(currentFormula.formulaParameters)
+      : [];
+    return normalizeFormulaParametersForMappings(next, activeVariablePool);
+  }, [currentFormula?.formulaParameters, activeVariablePool]);
 
   useEffect(() => {
-    setFormulaParameters(initialFormulaParameters);
-  }, [initialFormulaParameters]);
-  const latestVersion = (versionQuery.data?.[0] ?? null) as FormulaVersionDto | null;
+    if (!open) {
+      parametersDirtyRef.current = false;
+      return;
+    }
+    if (!parametersDirtyRef.current) {
+      setFormulaParameters(initialFormulaParameters);
+    }
+  }, [open, initialFormulaParameters]);
 
-  const handleParseUpdate = useCallback(
-    ({ dependencySummary: summary }: { dependencySummary: SimulationDependencySummary }) => {
-      setDependencySummary(summary);
+  const handleFormulaParametersChange = useCallback(
+    (next: FormulaParameterInput[]) => {
+      parametersDirtyRef.current = true;
+      setFormulaParameters(next);
     },
     [],
   );
+  const latestVersion = (versionQuery.data?.[0] ?? null) as FormulaVersionDto | null;
+
+  useEffect(() => {
+    if (!derived) {
+      return;
+    }
+    if (flowStep === "mapping" && !isTransformation) {
+      setFlowStep("parameters");
+    } else if (
+      (flowStep === "parameters" || flowStep === "studio") &&
+      isTransformation
+    ) {
+      setFlowStep("mapping");
+    }
+  }, [derived, flowStep, isTransformation]);
+
+  const invalidateDerivedFactorQueries = useCallback(async () => {
+    await queryClient.invalidateQueries({
+      queryKey: ["model-derived-factors", modelId],
+    });
+    if (derived?.id) {
+      await queryClient.invalidateQueries({
+        queryKey: ["model-derived-factor", modelId, derived.id],
+      });
+    }
+    await derivedFactorsQuery.refetch();
+    await derivedQuery.refetch();
+  }, [derived?.id, derivedFactorsQuery, derivedQuery, modelId, queryClient]);
+
+  const handleParseUpdate = useCallback(
+    ({
+      dependencySummary: summary,
+      status,
+    }: {
+      dependencySummary: SimulationDependencySummary;
+      status: "idle" | "validating" | "valid" | "broken" | "offline";
+    }) => {
+      setDependencySummary(summary);
+      setFormulaValidateState(status);
+    },
+    [],
+  );
+
+  const saveParametersMutation = useMutation({
+    mutationFn: async () => {
+      if (!derived) {
+        throw new Error("Derived factor not loaded.");
+      }
+      const normalized = normalizeFormulaParametersForMappings(
+        formulaParameters,
+        activeVariablePool,
+      );
+      const existing = await getFormulaByTarget(
+        modelId,
+        "derived_factor",
+        derived.id,
+      );
+
+      if (existing) {
+        return (
+          await updateFormula(existing.id, {
+            formulaParameters: normalized,
+            expectedVersion: existing.version,
+          })
+        ).data;
+      }
+
+      if (normalized.length === 0) {
+        return null;
+      }
+
+      return (
+        await createFormula(modelId, {
+          modelId,
+          targetType: "derived_factor",
+          targetId: derived.id,
+          formulaKind: "derived_factor",
+          formulaType: "deterministic",
+          rawExpression: "0",
+          formulaParameters: normalized,
+          manualMode: false,
+        })
+      ).data;
+    },
+    onSuccess: async () => {
+      parametersDirtyRef.current = false;
+      if (derived) {
+        await queryClient.invalidateQueries({
+          queryKey: ["formula-by-target", modelId, "derived_factor", derived.id],
+        });
+      }
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to save parameters");
+    },
+  });
+
+  const persistFormulaParameters = useCallback(async () => {
+    if (readOnly || isTransformation) {
+      return;
+    }
+    await saveParametersMutation.mutateAsync();
+  }, [isTransformation, readOnly, saveParametersMutation]);
 
   const saveDraftMutation = useMutation({
     mutationFn: async (expression: string) => {
       if (!derived) {
         return null;
       }
-      const existing = currentFormula;
+      const existing = await getFormulaByTarget(
+        modelId,
+        "derived_factor",
+        derived.id,
+      );
       if (existing) {
         return (
           await updateFormula(existing.id, {
             rawExpression: expression,
-            formulaParameters,
+            formulaParameters: normalizeFormulaParametersForMappings(
+              formulaParameters,
+              activeVariablePool,
+            ),
             expectedVersion: existing.version,
           })
         ).data;
@@ -191,12 +366,16 @@ export function DerivedFactorWorkspaceDialog({
           formulaKind: "derived_factor",
           formulaType: "deterministic",
           rawExpression: expression,
-          formulaParameters,
+          formulaParameters: normalizeFormulaParametersForMappings(
+            formulaParameters,
+            activeVariablePool,
+          ),
           manualMode: false,
         })
       ).data;
     },
     onSuccess: async () => {
+      parametersDirtyRef.current = false;
       toast.success("Formula draft saved");
       if (derived) {
         await queryClient.invalidateQueries({
@@ -204,15 +383,49 @@ export function DerivedFactorWorkspaceDialog({
         });
       }
     },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to save draft");
+    },
   });
 
   const submitReviewMutation = useMutation({
-    mutationFn: async () => {
-      if (!currentFormula) {
-        throw new Error("Save a formula draft before submitting for review.");
+    mutationFn: async (expression: string) => {
+      if (!derived) {
+        throw new Error("Derived factor not loaded.");
       }
-      await submitFormulaForReview(currentFormula.id, {
-        expectedVersion: currentFormula.version,
+      const existing = await getFormulaByTarget(
+        modelId,
+        "derived_factor",
+        derived.id,
+      );
+      const savedFormula = existing
+        ? (
+            await updateFormula(existing.id, {
+              rawExpression: expression,
+              formulaParameters: normalizeFormulaParametersForMappings(
+                formulaParameters,
+                activeVariablePool,
+              ),
+              expectedVersion: existing.version,
+            })
+          ).data
+        : (
+            await createFormula(modelId, {
+              modelId,
+              targetType: "derived_factor",
+              targetId: derived.id,
+              formulaKind: "derived_factor",
+              formulaType: "deterministic",
+              rawExpression: expression,
+              formulaParameters: normalizeFormulaParametersForMappings(
+                formulaParameters,
+                activeVariablePool,
+              ),
+              manualMode: false,
+            })
+          ).data;
+      await submitFormulaForReview(savedFormula.id, {
+        expectedVersion: savedFormula.version,
         changeNote: reviewNote.trim() || undefined,
       });
     },
@@ -321,13 +534,6 @@ export function DerivedFactorWorkspaceDialog({
               {derived ? (
                 <>
                   <StatusBadge status={derived.statusCode} />
-                  {currentFormula ? (
-                    <StatusBadge status={currentFormula.status} />
-                  ) : (
-                    <span className="rounded-md border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-zinc-500">
-                      No formula
-                    </span>
-                  )}
                 </>
               ) : null}
             </div>
@@ -337,8 +543,15 @@ export function DerivedFactorWorkspaceDialog({
             <FormulaWorkspaceStepper
               active={flowStep}
               onStepClick={(step) => setFlowStep(step)}
+              steps={wizardSteps}
               completedThrough={
-                formulaParameters.length > 0 ? "parameters" : "basics"
+                isTransformation
+                  ? mappingIsConfigured
+                    ? "mapping"
+                    : "basics"
+                  : formulaParameters.length > 0
+                    ? "parameters"
+                    : "basics"
               }
             />
           </div>
@@ -402,15 +615,35 @@ export function DerivedFactorWorkspaceDialog({
           {derived && flowStep === "parameters" ? (
             <div className="flex h-full min-h-0 flex-1 flex-col">
               <FormulaParametersStep
-                variablePool={variablePool}
+                variablePool={activeVariablePool}
                 parameters={formulaParameters}
-                onChange={setFormulaParameters}
+                onChange={handleFormulaParametersChange}
                 readOnly={readOnly}
               />
             </div>
           ) : null}
 
-          {derived && flowStep === "studio" ? (
+          {derived && flowStep === "mapping" ? (
+            <DerivedFactorMappingStep
+              derivedFactor={derived}
+              factorInstances={factorInstancesQuery.data ?? []}
+              readOnly={readOnly}
+              transformationOnly={isTransformation}
+              onSave={async (payload) => {
+                await updateMutation.mutateAsync({
+                  derivedFactorId: derived.id,
+                  payload: {
+                    ...payload,
+                    expectedVersion: derived.version,
+                  },
+                });
+                await invalidateDerivedFactorQueries();
+                toast.success("Transformation saved");
+              }}
+            />
+          ) : null}
+
+          {derived && flowStep === "studio" && !isTransformation ? (
             <div className="flex h-full min-h-0 flex-1 flex-col">
               {missingDependencies.length > 0 ? (
                 <p className="shrink-0 border-b border-amber-500/20 bg-amber-500/10 px-4 py-2 text-xs text-amber-200">
@@ -438,15 +671,16 @@ export function DerivedFactorWorkspaceDialog({
                   onSubmitForReview={
                     readOnly
                       ? undefined
-                      : async () => {
-                          await submitReviewMutation.mutateAsync();
+                      : async (storedExpression) => {
+                          await submitReviewMutation.mutateAsync(storedExpression);
                         }
                   }
                   isSavingDraft={saveDraftMutation.isPending}
                   isSubmittingReview={submitReviewMutation.isPending}
                   canSubmitForReview={canSubmitForReview}
+                  submitDisabledReason={submitDisabledReason}
                   onParseUpdate={handleParseUpdate}
-                  variablePool={variablePool}
+                  variablePool={activeVariablePool}
                   formulaParameters={formulaParameters}
                 />
               </div>
@@ -456,12 +690,34 @@ export function DerivedFactorWorkspaceDialog({
           {derived && flowStep === "review" ? (
             <div className="mx-auto max-w-2xl space-y-6">
               <div>
-                <h3 className="text-sm font-semibold text-[#f4f4f5]">Step 4 — Review &amp; publish</h3>
+                <h3 className="text-sm font-semibold text-[#f4f4f5]">
+                  {isTransformation ? "Review transformation" : "Review & publish"}
+                </h3>
                 <p className="mt-1 text-xs text-[#71717a]">
-                  Submit for review when the formula validates in Studio.
+                  {isTransformation
+                    ? "Transformation outputs are numeric features used in derived factors and outcomes. No formula approval is required."
+                    : "Submit for review when the formula validates in Studio."}
                 </p>
               </div>
-              {currentFormula && latestVersion ? (
+              {isTransformation ? (
+                <section className="rounded-lg border border-white/10 bg-[#0f0f11] p-4 text-xs text-zinc-400">
+                  <p className="font-medium text-zinc-200">Status</p>
+                  <p className="mt-1">
+                    {mappingIsConfigured ? (
+                      <span className="text-emerald-300/90">
+                        Ready — formulas can reference{" "}
+                        <span className="font-mono text-cyan-200">{derived.slug}</span> as a
+                        numeric input.
+                      </span>
+                    ) : (
+                      <span className="text-amber-300/90">
+                        Incomplete — save transformation rows in the previous step.
+                      </span>
+                    )}
+                  </p>
+                </section>
+              ) : null}
+              {!isTransformation && currentFormula && latestVersion ? (
                 <section className="rounded-lg border border-white/10 bg-[#0f0f11] p-4 text-xs text-zinc-400">
                   <p className="font-medium text-zinc-200">Governance</p>
                   <p className="mt-1">
@@ -508,9 +764,9 @@ export function DerivedFactorWorkspaceDialog({
                     </div>
                   ) : null}
                 </section>
-              ) : (
+              ) : !isTransformation ? (
                 <p className="text-xs text-[#71717a]">Save a formula draft in Studio first.</p>
-              )}
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -533,46 +789,47 @@ export function DerivedFactorWorkspaceDialog({
               ) : null}
             </div>
             <div className="flex gap-2">
-              {flowStep !== "basics" ? (
+              {flowStep !== wizardSteps[0]?.id ? (
                 <Button
                   type="button"
                   variant="outline"
                   className="border-white/10 text-zinc-300"
                   onClick={() => {
-                    const order: FormulaWorkspaceStep[] = [
-                      "basics",
-                      "parameters",
-                      "studio",
-                      "review",
-                    ];
-                    const idx = order.indexOf(flowStep);
+                    const idx = wizardSteps.findIndex((s) => s.id === flowStep);
                     if (idx > 0) {
-                      setFlowStep(order[idx - 1]!);
+                      setFlowStep(wizardSteps[idx - 1]!.id);
                     }
                   }}
                 >
                   Back
                 </Button>
               ) : null}
-              {flowStep !== "review" ? (
-                <Button
+              {flowStep !== wizardSteps[wizardSteps.length - 1]?.id ? (
+                <LoadingButton
                   type="button"
                   className="bg-cyan-600/90 text-white hover:bg-cyan-600"
+                  loading={saveParametersMutation.isPending}
+                  loadingText="Saving…"
                   onClick={() => {
-                    const order: FormulaWorkspaceStep[] = [
-                      "basics",
-                      "parameters",
-                      "studio",
-                      "review",
-                    ];
-                    const idx = order.indexOf(flowStep);
-                    if (idx < order.length - 1) {
-                      setFlowStep(order[idx + 1]!);
-                    }
+                    void (async () => {
+                      try {
+                        if (flowStep === "parameters" && !readOnly && !isTransformation) {
+                          await persistFormulaParameters();
+                        }
+                        const idx = wizardSteps.findIndex((s) => s.id === flowStep);
+                        if (idx < wizardSteps.length - 1) {
+                          setFlowStep(wizardSteps[idx + 1]!.id);
+                        }
+                      } catch {
+                        // Error toast handled by mutation
+                      }
+                    })();
                   }}
                 >
-                  Next
-                </Button>
+                  {flowStep === "parameters" && !readOnly && !isTransformation
+                    ? "Save & continue"
+                    : "Next"}
+                </LoadingButton>
               ) : null}
               {flowStep === "basics" && !readOnly ? (
                 <LoadingButton

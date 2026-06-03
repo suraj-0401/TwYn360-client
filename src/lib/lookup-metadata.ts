@@ -33,6 +33,28 @@ export function isUnitRequired(
   return Boolean(getDataTypeMetadata(dataTypes, dataTypeCode).unitRequired);
 }
 
+export function validationFieldTypesForDataType(
+  dataTypeCode: string,
+  metadata?: LookupMetadata,
+): LookupFieldTypeMap | undefined {
+  if (metadata?.fieldTypes && Object.keys(metadata.fieldTypes).length > 0) {
+    return metadata.fieldTypes;
+  }
+
+  switch (dataTypeCode) {
+    case "enum":
+      return { options: "stringArray" };
+    case "number":
+      return { min: "number", max: "number", step: "number" };
+    case "string":
+      return { minLength: "number", maxLength: "number", pattern: "string" };
+    case "date":
+      return { minDate: "date", maxDate: "date" };
+    default:
+      return undefined;
+  }
+}
+
 export function coerceValidationsForSubmit(
   validations: Record<string, unknown>,
   fieldTypes: LookupFieldTypeMap | undefined,

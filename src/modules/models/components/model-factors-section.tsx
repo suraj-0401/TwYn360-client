@@ -23,15 +23,17 @@ import {
   preservedFactorsTabBanner,
 } from "../utils/factor-set-lifecycle";
 import { ModelFactorInstanceConfigureDialog } from "./model-factor-instance-configure-dialog";
-import { ModelDerivedFactorsPanel } from "./model-derived-factors-panel";
+import { ModelFormulaFactorsPanel } from "./model-formula-factors-panel";
+import { ModelTransformationsPanel } from "./model-transformations-panel";
 import type { ResolvedModelFactorInstance } from "@/types/model-factor-instance";
 import { StatusBadge } from "@/components/data-table/status-badge";
 
-type FactorsSubTabId = "raw" | "derived";
+type FactorsSubTabId = "raw" | "transformations" | "formula-factors";
 
 const FACTORS_SUB_TABS = [
-  { id: "raw" as const, label: "Raw" },
-  { id: "derived" as const, label: "Derived" },
+  { id: "raw" as const, label: "Raw factors" },
+  { id: "transformations" as const, label: "Transformations" },
+  { id: "formula-factors" as const, label: "Derived factors" },
 ];
 
 type ModelFactorsSectionProps = {
@@ -326,7 +328,7 @@ export function ModelFactorsSection({
             isWorkspace ? "text-[#71717a]" : "text-muted-foreground",
           )}
         >
-          Raw registry factors and derived computed aliases for this model.
+          Raw intake factors, categorical transformations, and derived factor computations.
         </p>
       </div>
 
@@ -344,13 +346,23 @@ export function ModelFactorsSection({
           graphLocked={graphLocked}
           layout={layout}
         />
-      ) : (
-        <ModelDerivedFactorsPanel
+      ) : null}
+
+      {activeSubTab === "transformations" ? (
+        <ModelTransformationsPanel
           modelId={modelId}
-          readOnly={graphLocked}
+          readOnly={readOnly || graphLocked}
           layout={layout}
         />
-      )}
+      ) : null}
+
+      {activeSubTab === "formula-factors" ? (
+        <ModelFormulaFactorsPanel
+          modelId={modelId}
+          readOnly={readOnly || graphLocked}
+          layout={layout}
+        />
+      ) : null}
     </div>
   );
 }
