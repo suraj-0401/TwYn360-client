@@ -381,6 +381,7 @@ export function DerivedFactorWorkspaceDialog({
         await queryClient.invalidateQueries({
           queryKey: ["formula-by-target", modelId, "derived_factor", derived.id],
         });
+        void queryClient.invalidateQueries({ queryKey: ["model-formulas", modelId] });
       }
     },
     onError: (err) => {
@@ -433,6 +434,7 @@ export function DerivedFactorWorkspaceDialog({
       toast.success("Formula submitted for review");
       setReviewNote("");
       await queryClient.invalidateQueries({ queryKey: ["formula-by-target"] });
+      void queryClient.invalidateQueries({ queryKey: ["model-formulas", modelId] });
       await queryClient.invalidateQueries({ queryKey: ["formula-versions"] });
     },
     onError: (err) => {
@@ -453,6 +455,7 @@ export function DerivedFactorWorkspaceDialog({
       toast.success("Formula approved");
       setDecisionNote("");
       await queryClient.invalidateQueries({ queryKey: ["formula-by-target"] });
+      void queryClient.invalidateQueries({ queryKey: ["model-formulas", modelId] });
       await queryClient.invalidateQueries({ queryKey: ["formula-versions"] });
     },
     onError: (err) => {
@@ -474,6 +477,7 @@ export function DerivedFactorWorkspaceDialog({
       toast.success("Formula rejected");
       setDecisionNote("");
       await queryClient.invalidateQueries({ queryKey: ["formula-by-target"] });
+      void queryClient.invalidateQueries({ queryKey: ["model-formulas", modelId] });
       await queryClient.invalidateQueries({ queryKey: ["formula-versions"] });
     },
     onError: (err) => {
@@ -515,20 +519,18 @@ export function DerivedFactorWorkspaceDialog({
       >
         <DialogHeader className="shrink-0 border-b border-white/[0.06] px-5 py-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <DialogTitle className="text-[#f4f4f5]">
+            <div className="min-w-0 space-y-1">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-[#71717a]">
                 {readOnly ? "View derived factor" : "Manage derived factor"}
+              </p>
+              <DialogTitle className="text-2xl font-semibold tracking-tight text-[#f4f4f5]">
+                {derived?.displayName ?? "Loading…"}
               </DialogTitle>
-              <DialogDescription className="text-[#71717a]">
-                {derived ? (
-                  <>
-                    {derived.displayName}{" "}
-                    <span className="font-mono text-[#52525b]">({derived.slug})</span>
-                  </>
-                ) : (
-                  "Loading…"
-                )}
-              </DialogDescription>
+              {derived ? (
+                <DialogDescription className="font-mono text-xs text-[#52525b]">
+                  {derived.slug}
+                </DialogDescription>
+              ) : null}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {derived ? (
@@ -539,7 +541,7 @@ export function DerivedFactorWorkspaceDialog({
             </div>
           </div>
 
-          <div className="mt-3">
+          <div className="mt-4">
             <FormulaWorkspaceStepper
               active={flowStep}
               onStepClick={(step) => setFlowStep(step)}
@@ -559,7 +561,9 @@ export function DerivedFactorWorkspaceDialog({
 
         <div
           className={cn(
-            "min-h-0 flex-1 overflow-y-auto px-5 py-4",
+            "min-h-0 flex-1 px-5 py-4",
+            flowStep === "parameters" && "flex flex-col overflow-hidden",
+            flowStep !== "parameters" && flowStep !== "studio" && "overflow-y-auto",
             flowStep === "studio" && "overflow-hidden px-0 py-0",
           )}
         >

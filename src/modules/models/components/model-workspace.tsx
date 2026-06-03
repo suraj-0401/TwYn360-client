@@ -6,13 +6,14 @@ import { WorkspaceTabs } from "@/components/layout/workspace-tabs";
 import { EntityAuditPanel } from "@/components/data-table/entity-audit-panel";
 import { LIFECYCLE_STATUS } from "@/config/lifecycle";
 import type { ModelDto, UpdateModelPayload } from "@/types/model";
-import { useModelFactorSets } from "../hooks/use-model-factor-sets";
+import { useVisitedTabs } from "../hooks/use-visited-tabs";
 import { ModelFactorSetsSection } from "./model-factor-sets-section";
 import { ModelFactorsSection } from "./model-factors-section";
 import { ModelFormulaTab } from "./model-formula-tab";
 import { ModelRuntimeTab } from "./model-runtime-tab";
 import { ModelForm } from "./model-form";
 import { ModelSettingsTab } from "./model-settings-tab";
+import { ModelWorkspaceTabPanel } from "./model-workspace-tab-panel";
 import {
   MODEL_WORKSPACE_FORM_ID,
   MODEL_WORKSPACE_TABS,
@@ -33,10 +34,9 @@ export function ModelWorkspace({
   onSavingChange,
 }: ModelWorkspaceProps) {
   const [activeTab, setActiveTab] = useState<ModelWorkspaceTabId>("overview");
-  const factorSets = useModelFactorSets(model.id, model.factorSets);
+  const visitedTabs = useVisitedTabs(activeTab);
 
   const isArchived = model.statusCode === LIFECYCLE_STATUS.ARCHIVED;
-  // Graph is mutable on draft AND active; only archived/deleted are locked.
   const graphLocked = isArchived || model.statusCode === LIFECYCLE_STATUS.DELETED;
   const factorSetsReadOnly = readOnly || graphLocked;
   const formReadOnly = readOnly && !isArchived;
@@ -58,7 +58,11 @@ export function ModelWorkspace({
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <WorkspaceContent>
-          {activeTab === "overview" ? (
+          <ModelWorkspaceTabPanel
+            tabId="overview"
+            activeId={activeTab}
+            visited={visitedTabs}
+          >
             <ModelForm
               mode="edit"
               layout="workspace"
@@ -70,47 +74,63 @@ export function ModelWorkspace({
               onSubmit={onSubmit}
               onSavingChange={onSavingChange}
             />
-          ) : null}
+          </ModelWorkspaceTabPanel>
 
-          {activeTab === "factor-sets" ? (
+          <ModelWorkspaceTabPanel
+            tabId="factor-sets"
+            activeId={activeTab}
+            visited={visitedTabs}
+          >
             <ModelFactorSetsSection
               modelId={model.id}
               factorSets={model.factorSets}
               readOnly={factorSetsReadOnly}
               graphLocked={graphLocked}
               layout="workspace"
-              actions={factorSets}
             />
-          ) : null}
+          </ModelWorkspaceTabPanel>
 
-          {activeTab === "factors" ? (
+          <ModelWorkspaceTabPanel
+            tabId="factors"
+            activeId={activeTab}
+            visited={visitedTabs}
+          >
             <ModelFactorsSection
               modelId={model.id}
               readOnly={readOnly || graphLocked}
               graphLocked={graphLocked}
               layout="workspace"
             />
-          ) : null}
+          </ModelWorkspaceTabPanel>
 
-          {activeTab === "formula" ? (
-            <ModelFormulaTab
-              modelId={model.id}
-              readOnly={graphLocked}
-            />
-          ) : null}
+          <ModelWorkspaceTabPanel
+            tabId="formula"
+            activeId={activeTab}
+            visited={visitedTabs}
+          >
+            <ModelFormulaTab modelId={model.id} readOnly={graphLocked} />
+          </ModelWorkspaceTabPanel>
 
-          {activeTab === "run" ? <ModelRuntimeTab modelId={model.id} /> : null}
+          <ModelWorkspaceTabPanel tabId="run" activeId={activeTab} visited={visitedTabs}>
+            <ModelRuntimeTab modelId={model.id} />
+          </ModelWorkspaceTabPanel>
 
-          {activeTab === "settings" ? <ModelSettingsTab model={model} /> : null}
+          <ModelWorkspaceTabPanel
+            tabId="settings"
+            activeId={activeTab}
+            visited={visitedTabs}
+          >
+            <ModelSettingsTab model={model} />
+          </ModelWorkspaceTabPanel>
 
-          {activeTab === "audit" ? (
+          <ModelWorkspaceTabPanel tabId="audit" activeId={activeTab} visited={visitedTabs}>
             <EntityAuditPanel
               entityType="model"
               entityId={model.id}
               variant="platform"
               title="Model activity"
             />
-          ) : null}
+          </ModelWorkspaceTabPanel>
         </WorkspaceContent>
       </div>
     </div>

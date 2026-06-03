@@ -46,7 +46,7 @@ export function activeModelPreservedFactorSetBanner(): string {
 }
 
 export function draftModelUnavailableFactorSetBanner(): string {
-  return "One or more linked factor sets are archived or deleted in the global registry. On draft models, detach those links and re-sync, or restore the global set.";
+  return "One or more linked factor sets are archived or deleted in the global registry. On draft models, detach those links or restore the global set.";
 }
 
 export function preservedFactorsTabBanner(count: number): string {

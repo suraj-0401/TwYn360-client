@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useQueries } from "@tanstack/react-query";
 import {
   Calculator,
   Eye,
@@ -20,12 +19,11 @@ import { useConfirm } from "@/components/feedback";
 import { FactorTableSkeleton, QueryErrorState } from "@/components/feedback";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { WORKSPACE_SLUGS } from "@/config/workspace";
 import { env } from "@/config/env";
-import { usePrefetchWorkspace } from "@/renderer/hooks/use-prefetch-workspace";
-import { getFormulaByTarget } from "@/services/formula.service";
 import { useDerivedFactorMutations, useDerivedFactors } from "../hooks/use-derived-factors";
 import { useModelFactorInstances } from "../hooks/use-model-factor-instances";
+import { useModelFormulas } from "../hooks/use-model-formulas";
+import { lookupFormulaByTarget } from "../utils/formula-target-index";
 import {
   buildFormulaVariablePool,
   slugToFormulaAlias,
@@ -56,7 +54,6 @@ export function ModelFormulaFactorsPanel({
   const { confirm } = useConfirm();
   const adminKey = env.NEXT_PUBLIC_ADMIN_API_KEY;
   const isWorkspace = layout === "workspace";
-  usePrefetchWorkspace(WORKSPACE_SLUGS.DERIVED_FACTOR_FORM);
   const derivedQuery = useDerivedFactors(modelId);
   const { createMutation, deleteMutation } = useDerivedFactorMutations(modelId);
   const { data: factorInstances } = useModelFactorInstances(modelId);
@@ -82,21 +79,19 @@ export function ModelFormulaFactorsPanel({
     [factorInstances, allItems, workspaceFactorId],
   );
 
-  const formulaStatusQueries = useQueries({
-    queries: items.map((item) => ({
-      queryKey: ["formula-by-target", modelId, "derived_factor", item.id],
-      queryFn: async () => getFormulaByTarget(modelId, "derived_factor", item.id),
-      staleTime: 30_000,
-    })),
-  });
+  const modelFormulasQuery = useModelFormulas(modelId);
 
   const formulaPayloadById = useMemo(() => {
     const map = new Map<string, unknown>();
-    items.forEach((item, index) => {
-      map.set(item.id, formulaStatusQueries[index]?.data);
-    });
+    for (const item of items) {
+      map.set(
+        item.id,
+        lookupFormulaByTarget(modelFormulasQuery.byTarget, "derived_factor", item.id) ??
+          null,
+      );
+    }
     return map;
-  }, [items, formulaStatusQueries]);
+  }, [items, modelFormulasQuery.byTarget]);
 
   const canEdit = !readOnly;
 

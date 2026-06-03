@@ -54,7 +54,7 @@ export function FormulaWorkspaceStepper({
   return (
     <nav
       aria-label="Formula authoring steps"
-      className="flex flex-wrap items-center gap-1 border-b border-white/[0.06] pb-3"
+      className="flex flex-wrap items-center gap-3 border-b border-white/[0.06] pb-4"
     >
       {steps.map((step, index) => {
         const idx = stepOrder.indexOf(step.id);
@@ -63,7 +63,7 @@ export function FormulaWorkspaceStepper({
         const clickable = onStepClick && idx <= Math.max(activeIdx, completedIdx + 1);
 
         return (
-          <div key={step.id} className="flex items-center gap-1">
+          <div key={step.id} className="flex items-center gap-2">
             {index > 0 ? (
               <span className="mx-1 hidden text-[#3f3f46] sm:inline">→</span>
             ) : null}
@@ -72,7 +72,7 @@ export function FormulaWorkspaceStepper({
               disabled={!clickable}
               onClick={() => clickable && onStepClick?.(step.id)}
               className={cn(
-                "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
+                "inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
                 isActive
                   ? "bg-cyan-500/15 text-cyan-100 ring-1 ring-cyan-500/30"
                   : isComplete
@@ -84,7 +84,7 @@ export function FormulaWorkspaceStepper({
             >
               <span
                 className={cn(
-                  "flex size-5 items-center justify-center rounded-full text-[10px]",
+                  "flex size-6 items-center justify-center rounded-full text-[11px] font-medium",
                   isActive
                     ? "bg-cyan-500/25 text-cyan-100"
                     : isComplete
@@ -92,7 +92,7 @@ export function FormulaWorkspaceStepper({
                       : "bg-white/[0.06] text-[#71717a]",
                 )}
               >
-                {isComplete && !isActive ? <Check className="size-3" /> : index + 1}
+                {isComplete && !isActive ? <Check className="size-3.5" /> : index + 1}
               </span>
               {step.label}
             </button>

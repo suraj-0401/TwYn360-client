@@ -30,6 +30,14 @@ type UpdateFormulaPayload = {
   expectedVersion?: number;
 };
 
+export async function listModelFormulas(modelId: string) {
+  const { data } = await apiClient.get<ApiSuccessResponse<FormulaDto[]>>(
+    `/api/v1/models/${modelId}/formulas`,
+    { skipGlobalErrorToast: true },
+  );
+  return data;
+}
+
 export async function getFormulaByTarget(
   modelId: string,
   targetType: FormulaTargetType,

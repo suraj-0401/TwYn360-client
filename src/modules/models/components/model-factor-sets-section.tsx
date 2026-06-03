@@ -40,8 +40,14 @@ export function ModelFactorSetsSection({
   const { confirm } = useConfirm();
   const internalActions = useModelFactorSets(modelId, factorSets);
   const actions = actionsProp ?? internalActions;
-  const { rows, excludeFactorSetIds, busyFactorSetId, handleAdd, handleDetach, handleReorder } =
-    actions;
+  const {
+    rows,
+    excludeFactorSetIds,
+    busyFactorSetId,
+    handleAdd,
+    handleDetach,
+    handleReorder,
+  } = actions;
   const [modalOpen, setModalOpen] = useState(false);
 
   const isWorkspace = layout === "workspace";
@@ -101,16 +107,18 @@ export function ModelFactorSetsSection({
           </div>
 
           {!readOnly ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="shrink-0"
-              onClick={() => setModalOpen(true)}
-            >
-              <Plus className="mr-1 h-4 w-4" />
-              Attach factor set
-            </Button>
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="shrink-0"
+                onClick={() => setModalOpen(true)}
+              >
+                <Plus className="mr-1 h-4 w-4" />
+                Attach factor set
+              </Button>
+            </div>
           ) : null}
         </div>
 

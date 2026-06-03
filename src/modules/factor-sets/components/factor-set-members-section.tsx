@@ -165,6 +165,8 @@ function PersistedMembersSection({
       queryKey: ["factor-set", factorSetId],
     });
     void queryClient.invalidateQueries({ queryKey: ["factor-sets"] });
+    void queryClient.invalidateQueries({ queryKey: ["models"] });
+    void queryClient.invalidateQueries({ queryKey: ["model-factor-instances"] });
     for (const factorId of factorIds ?? []) {
       void queryClient.invalidateQueries({
         queryKey: ["factor-factor-sets", factorId],
@@ -191,7 +193,7 @@ function PersistedMembersSection({
     void runMemberMutation(
       factor.id,
       () => addFactorSetMember(factorSetId, { factorId: factor.id }),
-      "Factor added to set",
+      "Factor added to set — linked models updated",
     );
   }
 

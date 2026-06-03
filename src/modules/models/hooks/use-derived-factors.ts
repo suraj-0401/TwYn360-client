@@ -60,6 +60,7 @@ export function useDerivedFactorMutations(modelId: string) {
     await queryClient.invalidateQueries({ queryKey: ["model-derived-factors", modelId] });
     await queryClient.invalidateQueries({ queryKey: ["model-derived-factor", modelId] });
     await queryClient.invalidateQueries({ queryKey: ["formula-by-target", modelId] });
+    void queryClient.invalidateQueries({ queryKey: ["model-formulas", modelId] });
   };
 
   const createMutation = useMutation({

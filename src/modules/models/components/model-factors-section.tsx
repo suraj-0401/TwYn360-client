@@ -23,8 +23,10 @@ import {
   preservedFactorsTabBanner,
 } from "../utils/factor-set-lifecycle";
 import { ModelFactorInstanceConfigureDialog } from "./model-factor-instance-configure-dialog";
+import { useVisitedTabs } from "../hooks/use-visited-tabs";
 import { ModelFormulaFactorsPanel } from "./model-formula-factors-panel";
 import { ModelTransformationsPanel } from "./model-transformations-panel";
+import { ModelWorkspaceTabPanel } from "./model-workspace-tab-panel";
 import type { ResolvedModelFactorInstance } from "@/types/model-factor-instance";
 import { StatusBadge } from "@/components/data-table/status-badge";
 
@@ -309,6 +311,7 @@ export function ModelFactorsSection({
   layout = "workspace",
 }: ModelFactorsSectionProps) {
   const [activeSubTab, setActiveSubTab] = useState<FactorsSubTabId>("raw");
+  const visitedSubTabs = useVisitedTabs(activeSubTab);
   const isWorkspace = layout === "workspace";
 
   return (
@@ -339,30 +342,38 @@ export function ModelFactorsSection({
         className="rounded-lg border border-white/[0.06]"
       />
 
-      {activeSubTab === "raw" ? (
+      <ModelWorkspaceTabPanel tabId="raw" activeId={activeSubTab} visited={visitedSubTabs}>
         <ModelRawFactorsPanel
           modelId={modelId}
           readOnly={readOnly}
           graphLocked={graphLocked}
           layout={layout}
         />
-      ) : null}
+      </ModelWorkspaceTabPanel>
 
-      {activeSubTab === "transformations" ? (
+      <ModelWorkspaceTabPanel
+        tabId="transformations"
+        activeId={activeSubTab}
+        visited={visitedSubTabs}
+      >
         <ModelTransformationsPanel
           modelId={modelId}
           readOnly={readOnly || graphLocked}
           layout={layout}
         />
-      ) : null}
+      </ModelWorkspaceTabPanel>
 
-      {activeSubTab === "formula-factors" ? (
+      <ModelWorkspaceTabPanel
+        tabId="formula-factors"
+        activeId={activeSubTab}
+        visited={visitedSubTabs}
+      >
         <ModelFormulaFactorsPanel
           modelId={modelId}
           readOnly={readOnly || graphLocked}
           layout={layout}
         />
-      ) : null}
+      </ModelWorkspaceTabPanel>
     </div>
   );
 }
